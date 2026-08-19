@@ -1,0 +1,41 @@
+classDiagram
+    class Portrait {
+        +String _id
+        +String file_id
+        +String url
+        +int width
+        +int height
+        +int size
+        +bigint created_at
+    }
+    class Remain {
+        +String _id
+        +String name
+        +String gender
+        +int age
+        +String cause
+        +String portrait_id
+        +String plan_date
+        +String actual_date
+        +int buried
+        +bigint created_at
+        +bigint updated_at
+    }
+    class DataApi {
+        +login(account, password)
+        +listUsers(token, keyword)
+        +createUser(token, data)
+        +updateUser(token, id, data)
+        +deactivateUser(token, id)
+        +removeUser(token, id)
+        +listPortraits(token)
+        +uploadPortrait(token, image)
+        +deletePortrait(token, id)
+        +listRemains(token, keyword)
+        +createRemain(token, data)
+        +updateRemain(token, id, data)
+        +deleteRemain(token, id)
+    }
+    Remain "0..*" --> "0..1" Portrait : portrait_id
+    DataApi ..> Portrait : 读写
+    DataApi ..> Remain : 读写

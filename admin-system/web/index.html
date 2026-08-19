@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>殡葬管理系统</title>
+  <script src="./libs/vue.global.prod.js"></script>
+  <style>
+    :root {
+      /* 黑白灰主题 */
+      --bg: #f5f5f5;
+      --bg-dark: #e0e0e0;
+      --panel: #ffffff;
+      --ink: #1a1a1a;
+      --muted: #6b6b6b;
+      --primary: #1a1a1a;
+      --primary-dark: #000000;
+      --accent: #9e9e9e;
+      --danger: #4a4a4a;
+      --danger-dark: #2a2a2a;
+      --ok: #3a3a3a;
+      --line: #c9c9c9;
+      --shadow: 4px 4px 0 0 #d0d0d0;
+      --shadow-sm: 2px 2px 0 0 #d0d0d0;
+      --ui-font: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--ui-font);
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ===== 通用控件（像素风硬阴影 + 圆角）===== */
+    .pixel-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .pixel-btn {
+      display: inline-block;
+      font-family: var(--ui-font);
+      font-weight: 500;
+      font-size: 13px;
+      padding: 8px 16px;
+      background: var(--accent);
+      color: #fff;
+      border: 1px solid #7c7c7c;
+      box-shadow: 3px 3px 0 0 #000;
+      cursor: pointer;
+      letter-spacing: .5px;
+      border-radius: 8px;
+      transition: transform .05s, box-shadow .05s, background .15s;
+    }
+    .pixel-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 1px 1px 0 0 #000;
+    }
+    .pixel-btn.primary { background: var(--primary); color: #fff; border-color: #000; }
+    .pixel-btn.primary:hover { background: var(--primary-dark); }
+    .pixel-btn.danger { background: var(--danger); color: #fff; border-color: #1a1a1a; }
+    .pixel-btn.danger:hover { background: var(--danger-dark); }
+    .pixel-btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); box-shadow: 2px 2px 0 0 #b5b5b5; }
+    .pixel-btn.ghost:hover { background: #f0f0f0; }
+    .pixel-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .pixel-input, .pixel-select {
+      width: 100%;
+      font-family: var(--ui-font);
+      font-size: 14px;
+      padding: 9px 12px;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      box-shadow: inset 2px 2px 0 0 #ececec;
+      outline: none;
+      border-radius: 8px;
+    }
+    .pixel-input:focus, .pixel-select:focus {
+      border-color: var(--primary);
+      box-shadow: 3px 3px 0 0 #000;
+    }
+    .pixel-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 5px;
+      letter-spacing: .5px;
+    }
+
+    /* ===== 登录页 ===== */
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      padding: 24px;
+    }
+    .login-card {
+      background: var(--panel);
+      border: 1px solid var(--ink);
+      box-shadow: 6px 6px 0 0 #000;
+      padding: 36px;
+      width: 380px;
+      max-width: 92vw;
+      text-align: center;
+      border-radius: 12px;
+    }
+    .login-title { font-size: 20px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+    .login-sub { font-size: 12px; color: var(--muted); letter-spacing: 1px; margin-bottom: 24px; }
+    .login-card .field { text-align: left; margin-bottom: 16px; }
+    .login-card .pixel-btn { width: 100%; margin-top: 6px; }
+    .remember-row { text-align: left; margin-bottom: 14px; }
+    .remember-label {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 13px; cursor: pointer; user-select: none; color: #1a1a1a;
+    }
+    .pixel-check {
+      appearance: none; width: 16px; height: 16px;
+      border: 1px solid var(--line); border-radius: 4px;
+      background: #fff; cursor: pointer; position: relative;
+    }
+    .pixel-check:checked { background: var(--primary); border-color: var(--primary); }
+    .pixel-check:checked::after {
+      content: "✓"; position: absolute; top: -2px; left: 2px;
+      font-size: 12px; color: #fff; font-weight: 700;
+    }
+    .err { color: var(--danger); font-size: 12px; margin-top: 12px; min-height: 16px; font-weight: 700; }
+
+    /* ===== 登录页底部像素装饰（固定页脚，通栏铺满，黑白灰主色调）===== */
+    .grave-decor {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      user-select: none;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+    .decor-stage {
+      width: 100%;
+      max-width: 1400px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 0 8px;
+    }
+    .tree { display: flex; flex-direction: column; align-items: center; }
+    .tree .crown { display: flex; flex-direction: column; align-items: center; }
+    .tree .crown-row { display: flex; }
+    .tree .crown-row span { width: 12px; height: 12px; }
+    .c-trunk { width: 16px; height: 44px; background: #2a2a2a; }
+
+    .garden { display: flex; align-items: flex-end; gap: 3px; }
+    .garden .flower { display: flex; flex-direction: column; align-items: center; }
+    .garden .flower .stem { width: 4px; background: #4a4a4a; }
+    .garden .flower .head { background: #9e9e9e; }
+    .grass { width: 5px; background: #555555; }
+    .rock { width: 14px; height: 8px; background: #6b6b6b; }
+
+    .candles { display: flex; align-items: flex-end; gap: 8px; }
+    .candle { display: flex; flex-direction: column; align-items: center; }
+    .candle .flame {
+      width: 6px; height: 10px; background: #f5f5f5; margin-bottom: 1px;
+      animation: flicker 0.35s steps(2) infinite;
+    }
+    .candle .wax { width: 10px; height: 16px; background: #d9d9d9; }
+    .candle .base { width: 16px; height: 4px; background: #1a1a1a; }
+    .candle:nth-child(2n) .flame { animation-delay: 0.15s; }
+    .candle:nth-child(3n) .flame { animation-delay: 0.28s; }
+
+    .tree .twinkle {
+      width: 6px; height: 6px; background: #f5f5f5;
+      animation: twinkle 1.6s steps(1) infinite;
+    }
+    .tree .twinkle.b { animation-delay: 0.8s; }
+
+    @keyframes flicker {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(0.7); }
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .candle .flame, .tree .twinkle { animation: none; }
+    }
+
+    /* ===== 首页灵堂布局 ===== */
+    .shrine {
+      min-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      padding: 40px 20px 80px;
+    }
+    /* 顶部横白布 */
+    .shrine .top-cloth {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 120px;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 40px;
+      pointer-events: none;
+    }
+    .shrine .cloth-panel {
+      width: 28%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .shrine .cloth-panel .line { width: 100%; height: 8px; background: #e8e8e8; }
+    .shrine .cloth-panel .line.dark { background: #cfcfcf; }
+    /* 两侧白布垂幔 */
+    .shrine .curtain {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 46px;
+      display: flex;
+      flex-direction: column;
+    }
+    .shrine .curtain.left { left: 24px; }
+    .shrine .curtain.right { right: 24px; }
+    .shrine .curtain span { width: 100%; height: 22px; background: #ececec; margin-bottom: 3px; }
+    .shrine .curtain span:nth-child(2n) { background: #dedede; }
+    /* 奠字 */
+    .shrine .dian {
+      font-family: "Songti SC", "SimSun", "STSong", serif;
+      font-size: 180px;
+      font-weight: 900;
+      line-height: 1;
+      color: #1a1a1a;
+      letter-spacing: 0;
+      animation: dian-breathe 2.4s steps(2) infinite;
+    }
+    @keyframes dian-breathe {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.82; }
+    }
+    /* 灵位底座 */
+    .shrine .altar {
+      margin-top: 10px;
+      width: 320px;
+      height: 14px;
+      background: #3a3a3a;
+      border-radius: 3px;
+    }
+    .shrine .altar2 {
+      width: 260px;
+      height: 10px;
+      background: #2a2a2a;
+      border-radius: 3px;
+      margin-top: 4px;
+    }
+    /* 底部蜡烛排 */
+    .shrine .candle-row {
+      position: absolute;
+      bottom: 24px;
+      display: flex;
+      gap: 30px;
+    }
+    .shrine .candle-row .candle .flame { width: 10px; height: 16px; }
+    .shrine .candle-row .candle .wax { width: 16px; height: 26px; background: #e8e8e8; }
+    .shrine .candle-row .candle .base { width: 24px; height: 6px; background: #1a1a1a; }
+
+    /* ===== 应用布局：左侧抽屉导航 ===== */
+    .app { display: flex; min-height: 100vh; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 20px;
+      background: #1a1a1a; border-right: 1px solid var(--line);
+      transition: width .18s ease; overflow: hidden; z-index: 20;
+      display: flex; flex-direction: column;
+    }
+    .sidebar:hover { width: 220px; }
+    .sidebar .tab {
+      height: 100vh; display: flex; align-items: center; justify-content: center;
+      color: #ffffff; font-size: 12px; font-weight: 600; letter-spacing: 1px;
+      writing-mode: vertical-rl; white-space: nowrap; cursor: pointer; padding: 6px 0;
+    }
+    .sidebar:hover .tab { display: none; }
+    .sidebar-inner { display: none; flex-direction: column; padding: 16px 10px; height: 100%; }
+    .sidebar:hover .sidebar-inner { display: flex; }
+    .sidebar .brand {
+      font-size: 14px; font-weight: 700; color: #ffffff; letter-spacing: 1px;
+      padding: 6px 4px 14px; border-bottom: 1px solid #3a3a3a; margin-bottom: 14px; white-space: nowrap;
+    }
+    .sidebar .nav-item {
+      display: block; padding: 10px 12px; margin-bottom: 4px; color: #e0e0e0;
+      text-decoration: none; font-weight: 500; letter-spacing: .5px;
+      border-radius: 8px; white-space: nowrap; cursor: pointer;
+    }
+    .sidebar .nav-item:hover, .sidebar .nav-item.active { background: #3a3a3a; color: #fff; }
+
+    .main { flex: 1; margin-left: 20px; padding: 24px 32px; }
+
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; padding: 14px 18px;
+      background: var(--panel); border: 1px solid var(--ink);
+      box-shadow: 4px 4px 0 0 #000; border-radius: 10px;
+    }
+    .topbar h1 { font-size: 18px; font-weight: 700; letter-spacing: 1px; }
+    .topbar .who { font-size: 12px; color: var(--muted); margin-left: 12px; font-weight: 500; }
+
+    .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .toolbar .pixel-input { flex: 1; }
+
+    .table-wrap {
+      background: var(--panel); border: 1px solid var(--ink);
+      box-shadow: 4px 4px 0 0 #000; overflow-x: auto; border-radius: 10px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid #ececec; font-size: 13px; }
+    th { background: #f7f7f7; font-weight: 600; letter-spacing: .5px; font-size: 12px; color: var(--muted); }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:nth-child(even) { background: #fafafa; }
+    .badge { display: inline-block; padding: 2px 10px; font-size: 12px; font-weight: 500; letter-spacing: .5px; border-radius: 999px; }
+    .badge.ok { background: #ececec; color: #333; }
+    .badge.off { background: #f0f0f0; color: #888; }
+    .badge.sys { background: #1a1a1a; color: #fff; }
+    .badge.plain { background: #f0f0f0; color: #888; }
+    .muted { color: #888; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .actions .pixel-btn { padding: 4px 8px; font-size: 11px; box-shadow: 2px 2px 0 0 #000; }
+    .empty { padding: 48px; text-align: center; color: var(--muted); font-weight: 700; letter-spacing: 1px; }
+
+    .modal-mask {
+      position: fixed; inset: 0; background: rgba(0,0,0,.5);
+      display: flex; align-items: center; justify-content: center; z-index: 30;
+    }
+    .modal {
+      background: var(--panel); border: 1px solid var(--ink);
+      box-shadow: 6px 6px 0 0 #000; padding: 26px; width: 500px; max-width: 94vw;
+      max-height: 90vh; overflow-y: auto; border-radius: 12px;
+    }
+    .modal h2 { font-size: 16px; font-weight: 700; letter-spacing: .5px; margin-bottom: 18px; }
+    .modal .field { margin-bottom: 14px; }
+    .modal .row { display: flex; gap: 12px; }
+    .modal .row .field { flex: 1; }
+    .modal .modal-btns { display: flex; gap: 10px; margin-top: 8px; }
+    .modal .modal-btns .pixel-btn { flex: 1; }
+    .preview-modal { width: 480px; }
+    .preview-box {
+      border: 2px dashed var(--ink); border-radius: 10px; overflow: hidden;
+      background: #f5f5f5; display: flex; align-items: center; justify-content: center;
+      min-height: 220px; margin-bottom: 12px; padding: 12px;
+    }
+    .preview-box img { max-width: 100%; max-height: 320px; display: block; border-radius: 6px; }
+    .preview-tip {
+      font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 12px; font-weight: 500;
+    }
+
+    /* 遗照选择（+号框 + 弹框网格） */
+    .portrait-pick-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+    .portrait-pick {
+      width: 72px; height: 72px; border: 2px dashed var(--ink); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      background: #f5f5f5; overflow: hidden; transition: border-color .15s;
+    }
+    .portrait-pick:hover { border-color: var(--primary); }
+    .portrait-pick img { width: 100%; height: 100%; object-fit: cover; }
+    .portrait-pick svg { width: 100%; height: 100%; }
+    .pick-plus { font-size: 32px; color: var(--muted); font-weight: 400; line-height: 1; }
+    .picker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; max-height: 300px; overflow-y: auto; }
+    .picker-cell {
+      border: 2px solid transparent; border-radius: 8px; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; padding: 6px;
+      transition: border-color .15s;
+    }
+    .picker-cell:hover { border-color: var(--primary); }
+    .picker-cell img, .picker-cell svg { width: 100%; height: 64px; object-fit: cover; border-radius: 6px; }
+    .picker-id { font-size: 11px; color: var(--muted); margin-top: 4px; font-weight: 500; }
+
+    /* ===== 遗像网格 ===== */
+    .portrait-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+    .portrait-cell {
+      background: var(--panel); border: 1px solid var(--ink);
+      box-shadow: 4px 4px 0 0 #000; border-radius: 12px; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .portrait-cell .thumb {
+      width: 100%; aspect-ratio: 1 / 1; display: flex; align-items: center;
+      justify-content: center; background: #ececec; overflow: hidden;
+    }
+    .portrait-cell .thumb img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+    .portrait-cell .meta { padding: 10px 12px; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+    .portrait-cell .meta .pid { font-weight: 700; color: var(--ink); }
+    .portrait-cell .cell-actions { padding: 0 12px 12px; }
+    .portrait-cell .cell-actions .pixel-btn { width: 100%; font-size: 12px; box-shadow: 2px 2px 0 0 #000; }
+
+    /* ===== 遗体卡片墙 ===== */
+    .remain-wall { display: grid; grid-template-columns: repeat(10, 1fr); gap: 14px; }
+    @media (max-width: 1400px) { .remain-wall { grid-template-columns: repeat(8, 1fr); } }
+    @media (max-width: 1100px) { .remain-wall { grid-template-columns: repeat(6, 1fr); } }
+    @media (max-width: 800px)  { .remain-wall { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 520px)  { .remain-wall { grid-template-columns: repeat(2, 1fr); } }
+    .remain-card {
+      background: var(--panel); border: 1px solid var(--ink);
+      box-shadow: 3px 3px 0 0 #000; border-radius: 12px; overflow: hidden;
+      display: flex; flex-direction: column; transition: transform .05s;
+    }
+    .remain-card:hover { transform: translate(-1px, -1px); }
+    .remain-card .avatar {
+      width: 100%; aspect-ratio: 1 / 1; background: #ececec;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .remain-card .avatar img, .remain-card .avatar svg { width: 100%; height: 100%; object-fit: cover; }
+    .remain-card .info { padding: 10px; font-size: 12px; }
+    .remain-card .info .name { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+    .remain-card .info .line { color: var(--muted); display: flex; justify-content: space-between; gap: 4px; flex-wrap: wrap; }
+    .remain-card .card-actions { padding: 0 10px 10px; display: flex; gap: 6px; }
+    .remain-card .card-actions .pixel-btn { flex: 1; font-size: 11px; padding: 4px 6px; box-shadow: 2px 2px 0 0 #000; }
+
+    .portrait-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .portrait-picker .opt {
+      width: 48px; height: 48px; border: 1px solid var(--line); border-radius: 6px;
+      cursor: pointer; overflow: hidden; position: relative;
+    }
+    .portrait-picker .opt img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
+    .portrait-picker .opt.active { border: 2px solid var(--primary); box-shadow: 2px 2px 0 0 #000; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    const { createApp, reactive, ref, computed, onMounted } = Vue;
+
+    const API_URL = "https://test-d2g8lzeup3f63654a-1253559338.ap-shanghai.app.tcloudbase.com/api/data";
+
+    // 默认灰色半身卡通形象（内联 SVG）
+    const DEFAULT_AVATAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" shape-rendering="crispEdges"><rect width="100" height="100" fill="#e6e6e6"/><rect x="34" y="10" width="32" height="6" fill="#a8a8a8"/><rect x="30" y="13" width="4" height="26" fill="#a8a8a8"/><rect x="66" y="13" width="4" height="26" fill="#a8a8a8"/><rect x="38" y="18" width="24" height="22" fill="#c9c9c9"/><rect x="42" y="26" width="4" height="4" fill="#7a7a7a"/><rect x="54" y="26" width="4" height="4" fill="#7a7a7a"/><rect x="46" y="35" width="8" height="5" fill="#7a7a7a"/><rect x="34" y="44" width="32" height="30" fill="#c9c9c9"/><rect x="30" y="46" width="40" height="6" fill="#b5b5b5"/></svg>`;
+
+    async function sha256Hex(str) {
+      const data = new TextEncoder().encode(str);
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    const CALL_FN = async (data) => {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const r = await res.json();
+      if (r.code !== 0) throw new Error(r.message);
+      return r.data;
+    };
+
+    // ===== Canvas 图像工具：压缩 + 灰度化 =====
+    const ImageUtil = {
+      MAX_EDGE: 800,
+      MAX_BYTES: 5 * 1024 * 1024,
+
+      // 读取原图，返回彩色预览 dataURL（不处理压缩/灰度）
+      async readPreview(file) {
+        if (file.size > this.MAX_BYTES) throw new Error("图片不能超过 5MB");
+        let bmp;
+        try {
+          bmp = await createImageBitmap(file);
+        } catch (e) {
+          bmp = await this._loadViaImage(file);
+        }
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = bmp.width; canvas.height = bmp.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(bmp, 0, 0);
+          return canvas.toDataURL("image/jpeg", 0.9);
+        } finally {
+          if (bmp && bmp.close) bmp.close();
+        }
+      },
+
+      async toGrayscale(file) {
+        if (file.size > this.MAX_BYTES) throw new Error("图片不能超过 5MB");
+        let bmp;
+        try {
+          bmp = await createImageBitmap(file);
+        } catch (e) {
+          // 降级：用 Image + objectURL
+          bmp = await this._loadViaImage(file);
+        }
+        try {
+          let w = bmp.width, h = bmp.height;
+          let scale = 1;
+          const maxEdge = Math.max(w, h);
+          if (maxEdge > this.MAX_EDGE) scale = this.MAX_EDGE / maxEdge;
+          const tw = Math.max(1, Math.round(w * scale));
+          const th = Math.max(1, Math.round(h * scale));
+
+          const canvas = document.createElement("canvas");
+          canvas.width = tw; canvas.height = th;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(bmp, 0, 0, tw, th);
+
+          const imageData = ctx.getImageData(0, 0, tw, th);
+          const px = imageData.data;
+          for (let i = 0; i < px.length; i += 4) {
+            const gray = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
+            px[i] = gray; px[i + 1] = gray; px[i + 2] = gray;
+          }
+          ctx.putImageData(imageData, 0, 0);
+
+          const dataURL = canvas.toDataURL("image/jpeg", 0.7);
+          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
+          const size = blob ? blob.size : Math.round((dataURL.length - dataURL.indexOf(",") - 1) * 0.75);
+          if (size > this.MAX_BYTES) throw new Error("处理后图片仍超过 5MB，请更换更小的图片");
+          return { dataURL, width: tw, height: th, size };
+        } finally {
+          if (bmp && bmp.close) bmp.close();
+        }
+      },
+
+      _loadViaImage(file) {
+        return new Promise((resolve, reject) => {
+          const url = URL.createObjectURL(file);
+          const img = new Image();
+          img.onload = () => { resolve(img); };
+          img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error("图片加载失败")); };
+          img.src = url;
+        });
+      },
+    };
+
+    // ===== 登录页 =====
+    const LoginPage = {
+      template: `
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-title">殡葬管理系统</div>
+            <div class="login-sub">// pixel funeral console //</div>
+            <div class="field">
+              <label class="pixel-label">账号 ACCOUNT</label>
+              <input class="pixel-input" v-model.trim="account" placeholder="请输入账号" autocomplete="username" name="account" />
+            </div>
+            <div class="field">
+              <label class="pixel-label">密码 PASSWORD</label>
+              <input class="pixel-input" v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" name="password" @keyup.enter="doLogin" />
+            </div>
+            <div class="remember-row">
+              <label class="remember-label">
+                <input type="checkbox" v-model="remember" class="pixel-check" />
+                <span>记住密码</span>
+              </label>
+            </div>
+            <button class="pixel-btn primary" :disabled="loading" @click="doLogin">
+              {{ loading ? '登录中...' : '登 录 LOGIN' }}
+            </button>
+            <div class="err">{{ err }}</div>
+          </div>
+          <div class="grave-decor">
+            <div class="decor-stage">
+              <!-- 左树（高大，灰阶） -->
+              <div class="tree">
+                <div class="crown">
+                  <div class="crown-row"><span style="background:#2a2a2a"></span><span style="background:#2a2a2a"></span><span style="background:#2a2a2a"></span><span class="twinkle"></span><span style="background:#2a2a2a"></span></div>
+                  <div class="crown-row"><span style="background:#2a2a2a"></span><span style="background:#3a3a3a"></span><span style="background:#3a3a3a"></span><span style="background:#3a3a3a"></span><span style="background:#2a2a2a"></span></div>
+                  <div class="crown-row"><span style="background:#3a3a3a"></span><span style="background:#4a4a4a"></span><span style="background:#4a4a4a"></span><span style="background:#4a4a4a"></span><span style="background:#3a3a3a"></span><span class="twinkle b"></span></div>
+                  <div class="crown-row"><span style="background:#3a3a3a"></span><span style="background:#4a4a4a"></span><span style="background:#5a5a5a"></span><span style="background:#4a4a4a"></span><span style="background:#3a3a3a"></span></div>
+                  <div class="crown-row"><span style="background:#3a3a3a"></span><span style="background:#424242"></span><span style="background:#4a4a4a"></span><span style="background:#424242"></span><span style="background:#3a3a3a"></span></div>
+                </div>
+                <div class="c-trunk"></div>
+              </div>
+
+              <!-- 左侧草丛：高→低，密集，逐渐收敛 -->
+              <div class="garden">
+                <div class="flower"><span class="head" style="width:10px;height:10px"></span><div class="stem" style="height:48px"></div></div>
+                <div class="flower"><div class="grass" style="height:40px"></div></div>
+                <div class="flower"><span class="head" style="width:7px;height:7px"></span><div class="stem" style="height:34px"></div></div>
+                <div class="flower"><div class="grass" style="height:28px"></div></div>
+                <div class="flower"><div class="rock"></div></div>
+                <div class="flower"><span class="head" style="width:8px;height:8px"></span><div class="stem" style="height:22px"></div></div>
+                <div class="flower"><div class="grass" style="height:16px"></div></div>
+                <div class="flower"><div class="stem" style="height:10px"></div></div>
+              </div>
+
+              <!-- 中间一排蜡烛（火光跳动） -->
+              <div class="candles">
+                <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+                <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+                <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+                <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+                <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+              </div>
+
+              <!-- 右侧草丛：低→高，密集 -->
+              <div class="garden">
+                <div class="flower"><div class="stem" style="height:10px"></div></div>
+                <div class="flower"><div class="grass" style="height:16px"></div></div>
+                <div class="flower"><span class="head" style="width:8px;height:8px"></span><div class="stem" style="height:22px"></div></div>
+                <div class="flower"><div class="rock"></div></div>
+                <div class="flower"><div class="grass" style="height:28px"></div></div>
+                <div class="flower"><span class="head" style="width:7px;height:7px"></span><div class="stem" style="height:34px"></div></div>
+                <div class="flower"><div class="grass" style="height:40px"></div></div>
+                <div class="flower"><span class="head" style="width:10px;height:10px"></span><div class="stem" style="height:48px"></div></div>
+              </div>
+
+              <!-- 右树（高大，灰阶） -->
+              <div class="tree">
+                <div class="crown">
+                  <div class="crown-row"><span style="background:#2a2a2a"></span><span style="background:#2a2a2a"></span><span style="background:#2a2a2a"></span><span class="twinkle"></span><span style="background:#2a2a2a"></span></div>
+                  <div class="crown-row"><span style="background:#2a2a2a"></span><span style="background:#3a3a3a"></span><span style="background:#3a3a3a"></span><span style="background:#3a3a3a"></span><span style="background:#2a2a2a"></span></div>
+                  <div class="crown-row"><span class="twinkle b"></span><span style="background:#3a3a3a"></span><span style="background:#4a4a4a"></span><span style="background:#4a4a4a"></span><span style="background:#4a4a4a"></span><span style="background:#3a3a3a"></span></div>
+                  <div class="crown-row"><span style="background:#3a3a3a"></span><span style="background:#4a4a4a"></span><span style="background:#5a5a5a"></span><span style="background:#4a4a4a"></span><span style="background:#3a3a3a"></span></div>
+                  <div class="crown-row"><span style="background:#3a3a3a"></span><span style="background:#424242"></span><span style="background:#4a4a4a"></span><span style="background:#424242"></span><span style="background:#3a3a3a"></span></div>
+                </div>
+                <div class="c-trunk"></div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props, { emit }) {
+        const account = ref("");
+        const password = ref("");
+        const err = ref("");
+        const loading = ref(false);
+        const remember = ref(false);
+        const REMEMBER_KEY = "pixel_admin_remember";
+
+        const loadRemembered = () => {
+          try {
+            const raw = localStorage.getItem(REMEMBER_KEY);
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            if (saved && saved.account && saved.password) {
+              account.value = saved.account; password.value = saved.password; remember.value = true;
+            }
+          } catch (e) { /* ignore */ }
+        };
+        const saveRemembered = () => {
+          try {
+            if (remember.value && account.value && password.value) {
+              localStorage.setItem(REMEMBER_KEY, JSON.stringify({ account: account.value, password: password.value }));
+            } else {
+              localStorage.removeItem(REMEMBER_KEY);
+            }
+          } catch (e) { /* ignore */ }
+        };
+        onMounted(loadRemembered);
+        const doLogin = async () => {
+          err.value = "";
+          if (!account.value) { err.value = "请输入账号"; return; }
+          if (!password.value) { err.value = "请输入密码"; return; }
+          loading.value = true;
+          try {
+            const hash = await sha256Hex(password.value);
+            const d = await CALL_FN({ action: "login", account: account.value, password: hash });
+            saveRemembered();
+            emit("login", d.token, d.username || account.value);
+          } catch (e) { err.value = e.message; }
+          finally { loading.value = false; }
+        };
+        return { account, password, err, loading, remember, doLogin };
+      },
+    };
+
+    // ===== 应用壳：抽屉导航 + 页面切换 =====
+    const AppShell = {
+      props: ["token", "who", "page"],
+      emits: ["change-page", "logout"],
+      template: `
+        <div class="app">
+          <aside class="sidebar">
+            <div class="tab">☰</div>
+            <div class="sidebar-inner">
+              <div class="brand">◆ 殡葬管理台</div>
+              <div class="nav-item" :class="{active: page==='home'}" @click="$emit('change-page','home')">首页</div>
+              <div class="nav-item" :class="{active: page==='portrait'}" @click="$emit('change-page','portrait')">遗像管理</div>
+              <div class="nav-item" :class="{active: page==='remain'}" @click="$emit('change-page','remain')">遗体管理</div>
+              <div class="nav-item" :class="{active: page==='user'}" @click="$emit('change-page','user')">用户管理</div>
+              <div class="nav-item" :class="{active: page==='devlog'}" @click="$emit('change-page','devlog')">开发者日志</div>
+            </div>
+          </aside>
+          <div class="main">
+            <div class="topbar">
+              <div style="display:flex;align-items:baseline">
+                <h1>{{ pageTitle }}</h1>
+                <span class="who">当前账号：{{ who }}</span>
+              </div>
+              <button class="pixel-btn danger" @click="$emit('logout')">退出登录</button>
+            </div>
+            <slot></slot>
+          </div>
+        </div>`,
+      computed: {
+        pageTitle() {
+          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", devlog: "开发者日志" };
+          return map[this.page] || "管理台";
+        },
+      },
+    };
+
+    // ===== 用户管理页（无壳，由壳包）=====
+    const UserManage = {
+      props: ["token", "who"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <input class="pixel-input" v-model.trim="keyword" placeholder="搜索账号 / 用户名..." @keyup.enter="load" />
+            <button class="pixel-btn primary" @click="load">搜索</button>
+            <button class="pixel-btn" @click="openCreate">＋ 创建用户</button>
+          </div>
+          <div class="table-wrap">
+            <table v-if="rows.length">
+              <thead><tr>
+                <th>账号</th><th>用户名</th><th>状态</th><th>年龄</th><th>性别</th>
+                <th>是否内置</th><th>创建时间</th><th>修改时间</th><th>操作</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="row in rows" :key="row._id">
+                  <td style="font-weight:700">{{ row.account }}</td>
+                  <td>{{ row.username }}</td>
+                  <td><span class="badge" :class="row.status===1?'ok':'off'">{{ row.status===1?'有效':'注销' }}</span></td>
+                  <td>{{ row.age }}</td>
+                  <td>{{ row.gender }}</td>
+                  <td><span class="badge" :class="row.is_system===1?'sys':'plain'">{{ row.is_system===1?'内置':'否' }}</span></td>
+                  <td>{{ fmtTime(row.created_at) }}</td>
+                  <td>{{ fmtTime(row.updated_at) }}</td>
+                  <td>
+                    <div class="actions">
+                      <template v-if="row.is_system !== 1">
+                        <button class="pixel-btn ghost" @click="openEdit(row)">编辑</button>
+                        <button v-if="row.status===1" class="pixel-btn" @click="deactivate(row)">注销</button>
+                        <button class="pixel-btn danger" @click="del(row)">删除</button>
+                      </template>
+                      <span v-else class="muted" style="font-size:12px">受保护</span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="empty">暂无用户，点击「创建用户」开始</div>
+          </div>
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>{{ editing ? '修改用户' : '创建用户' }}</h2>
+              <div class="field"><label class="pixel-label">账号 *</label>
+                <input class="pixel-input" v-model.trim="form.account" :disabled="editing" placeholder="唯一，创建后不可改" /></div>
+              <div class="field"><label class="pixel-label">用户名 *</label>
+                <input class="pixel-input" v-model.trim="form.username" placeholder="昵称（可重复）" /></div>
+              <div class="field"><label class="pixel-label">{{ editing?'密码（留空则不修改）':'密码 *' }}</label>
+                <input class="pixel-input" v-model="form.password" type="password" placeholder="********" /></div>
+              <div class="row">
+                <div class="field"><label class="pixel-label">年龄 *</label>
+                  <input class="pixel-input" v-model="form.age" placeholder="数字" @blur="checkAge" /></div>
+                <div class="field"><label class="pixel-label">性别 *</label>
+                  <select class="pixel-select" v-model="form.gender">
+                    <option value="" disabled>请选择</option>
+                    <option value="男">男</option>
+                    <option value="女">女</option>
+                  </select></div>
+              </div>
+              <div class="field"><label class="pixel-label">状态</label>
+                <select class="pixel-select" v-model="form.status">
+                  <option :value="1">有效</option>
+                  <option :value="0">注销</option>
+                </select></div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props, { emit }) {
+        const rows = ref([]);
+        const keyword = ref("");
+        const showModal = ref(false);
+        const editing = ref(false);
+        const editId = ref(null);
+        const form = reactive({ account: "", username: "", password: "", age: "", gender: "", status: 1 });
+
+        const fmtTime = (ms) => {
+          if (!ms) return "-";
+          const d = new Date(Number(ms));
+          const p = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        };
+
+        const who = ref("");
+        const load = async () => {
+          const data = { action: "listUsers", token: props.token };
+          if (keyword.value) data.keyword = keyword.value;
+          try { rows.value = await CALL_FN(data); }
+          catch (e) { alert(e.message); }
+        };
+        const resetForm = () => {
+          form.account = ""; form.username = ""; form.password = ""; form.age = ""; form.gender = ""; form.status = 1;
+        };
+        const openCreate = () => { editing.value = false; editId.value = null; resetForm(); showModal.value = true; };
+        const openEdit = (row) => {
+          editing.value = true; editId.value = row._id;
+          form.account = row.account; form.username = row.username; form.password = "";
+          form.age = row.age; form.gender = row.gender; form.status = row.status;
+          showModal.value = true;
+        };
+        const checkAge = () => {
+          if (form.age === "" || form.age == null) return;
+          if (!/^\d+$/.test(String(form.age))) alert("年龄必须为数字（非负整数）");
+        };
+        const save = async () => {
+          if (!form.account) { alert("账号不能为空"); return; }
+          if (!form.username) { alert("用户名不能为空"); return; }
+          if (!editing.value && !form.password) { alert("密码不能为空"); return; }
+          if (form.age === "" || form.age == null || !/^\d+$/.test(String(form.age))) { alert("年龄必须为数字（非负整数）"); return; }
+          if (form.gender !== "男" && form.gender !== "女") { alert("请选择性别"); return; }
+          try {
+            const data = {
+              action: editing.value ? "updateUser" : "createUser",
+              token: props.token,
+              data: {
+                username: form.username, age: Number(form.age),
+                gender: form.gender, status: Number(form.status),
+              },
+            };
+            if (editing.value) {
+              data.id = editId.value;
+              if (form.password) data.data.password = await sha256Hex(form.password);
+            } else {
+              data.data.account = form.account;
+              data.data.password = await sha256Hex(form.password);
+            }
+            await CALL_FN(data);
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+        const deactivate = async (row) => {
+          if (!confirm(`确定注销用户「${row.account}」？注销后该用户无法登录。`)) return;
+          try { await CALL_FN({ action: "deactivateUser", token: props.token, id: row._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+        const del = async (row) => {
+          if (!confirm(`确定删除用户「${row.account}」？此操作不可恢复。`)) return;
+          try { await CALL_FN({ action: "removeUser", token: props.token, id: row._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+        onMounted(() => {
+          try { who.value = JSON.parse(atob(props.token)).account || ""; } catch (e) { who.value = ""; }
+          load();
+        });
+        return { rows, keyword, showModal, editing, form, fmtTime, load, openCreate, openEdit, save, deactivate, del, checkAge, who };
+      },
+    };
+
+    // ===== 遗像管理页 =====
+    const PortraitManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <button class="pixel-btn primary" @click="triggerUpload" :disabled="uploading">
+              {{ uploading ? '处理中...' : '＋ 上传遗像' }}
+            </button>
+            <input ref="fileInput" type="file" accept="image/*" style="display:none" @change="onFileChange" />
+          </div>
+          <div v-if="rows.length" class="portrait-grid">
+            <div class="portrait-cell" v-for="p in rows" :key="p._id">
+              <div class="thumb">
+                <img v-if="p.url" :src="p.url" :alt="'遗像 ' + p._id" />
+                <img v-else :src="dummyDataURL" alt="占位" />
+              </div>
+              <div class="meta">
+                <div class="pid">遗像 ID：{{ p._id }}</div>
+                <div>{{ p.width }} × {{ p.height }}px · {{ fmtSize(p.size) }}</div>
+              </div>
+              <div class="cell-actions">
+                <button class="pixel-btn danger" @click="del(p)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px">暂无遗像，点击「上传遗像」开始</div>
+
+          <!-- 上传预览弹框 -->
+          <div v-if="showPreview" class="modal-mask" @click.self="showPreview=false">
+            <div class="modal preview-modal">
+              <h2>遗像预览</h2>
+              <div class="preview-box">
+                <img :src="previewSrc" alt="预览图" />
+              </div>
+              <div class="preview-tip" v-if="!grayed">这是原始图片，点击「一键遗像」转为黑白</div>
+              <div class="preview-tip" v-else>已转为黑白，点击「保存」上传</div>
+              <div class="modal-btns">
+                <button class="pixel-btn" :disabled="graying" @click="applyGray">
+                  {{ graying ? '处理中...' : (grayed ? '重新转黑白' : '一键遗像') }}
+                </button>
+                <button class="pixel-btn primary" :disabled="!grayed || saving" @click="save">
+                  {{ saving ? '保存中...' : '保 存' }}
+                </button>
+                <button class="pixel-btn ghost" @click="showPreview=false">取 消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const rows = ref([]);
+        const uploading = ref(false);
+        const fileInput = ref(null);
+        const dummyDataURL = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+
+        // 预览弹框状态
+        const showPreview = ref(false);
+        const previewSrc = ref("");
+        const previewFile = ref(null);
+        const grayed = ref(false);
+        const graying = ref(false);
+        const saving = ref(false);
+        const grayResult = ref(null);
+
+        const fmtSize = (n) => {
+          n = Number(n) || 0;
+          if (n < 1024) return n + " B";
+          if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+          return (n / 1024 / 1024).toFixed(2) + " MB";
+        };
+
+        const load = async () => {
+          try { rows.value = await CALL_FN({ action: "listPortraits", token: props.token }); }
+          catch (e) { alert(e.message); }
+        };
+
+        const triggerUpload = () => { if (fileInput.value) fileInput.value.click(); };
+
+        const onFileChange = async (evt) => {
+          const file = evt.target.files && evt.target.files[0];
+          evt.target.value = "";
+          if (!file) return;
+          if (file.size > 5 * 1024 * 1024) { alert("图片不能超过 5MB"); return; }
+          try {
+            // 第一步：只读取原图预览，不转黑白
+            const preview = await ImageUtil.readPreview(file);
+            previewFile.value = file;
+            previewSrc.value = preview;
+            grayed.value = false;
+            grayResult.value = null;
+            showPreview.value = true;
+          } catch (e) { alert(e.message); }
+        };
+
+        const applyGray = async () => {
+          if (!previewFile.value) return;
+          graying.value = true;
+          try {
+            const res = await ImageUtil.toGrayscale(previewFile.value);
+            grayResult.value = res;
+            previewSrc.value = res.dataURL;
+            grayed.value = true;
+          } catch (e) { alert(e.message); }
+          finally { graying.value = false; }
+        };
+
+        const save = async () => {
+          if (!grayResult.value) return;
+          saving.value = true;
+          try {
+            const r = grayResult.value;
+            await CALL_FN({
+              action: "uploadPortrait",
+              token: props.token,
+              data: { image: r.dataURL, width: r.width, height: r.height, size: r.size },
+            });
+            showPreview.value = false;
+            await load();
+          } catch (e) { alert(e.message); }
+          finally { saving.value = false; }
+        };
+
+        const del = async (p) => {
+          if (!confirm(`确定删除遗像 #${p._id}？将删除云存储文件，被引用的遗体将恢复为默认灰色卡通形象。`)) return;
+          try { await CALL_FN({ action: "deletePortrait", token: props.token, id: p._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+
+        onMounted(load);
+        return {
+          rows, uploading, fileInput, dummyDataURL, fmtSize, load,
+          showPreview, previewSrc, grayed, graying, saving, applyGray, save,
+          triggerUpload, onFileChange, del,
+        };
+      },
+    };
+
+    // ===== 遗体管理页 =====
+    const RemainManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <input class="pixel-input" v-model.trim="keyword" placeholder="搜索姓名..." @keyup.enter="load" />
+            <button class="pixel-btn primary" @click="load">搜索</button>
+            <button class="pixel-btn" @click="openCreate">＋ 新增遗体</button>
+          </div>
+          <div v-if="rows.length" class="remain-wall">
+            <div class="remain-card" v-for="r in rows" :key="r._id">
+              <div class="avatar">
+                <img v-if="r.portrait_url" :src="r.portrait_url" :alt="r.name" />
+                <span v-else v-html="defaultAvatar"></span>
+              </div>
+              <div class="info">
+                <div class="name">{{ r.name }}</div>
+                <div class="line"><span>{{ r.gender }}</span><span>终年 {{ r.age }}</span></div>
+                <div class="line" v-if="r.buried"><span class="badge ok">已安葬</span></div>
+                <div class="line" v-else><span class="badge off">未安葬</span></div>
+                <div class="line" v-if="r.plan_date"><span>计划安葬 {{ r.plan_date }}</span></div>
+                <div class="line" v-if="r.actual_date"><span>实际安葬 {{ r.actual_date }}</span></div>
+              </div>
+              <div class="card-actions">
+                <button class="pixel-btn ghost" @click="openEdit(r)">编辑</button>
+                <button class="pixel-btn danger" @click="del(r)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px">暂无遗体记录，点击「新增遗体」开始</div>
+
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>{{ editing ? '修改遗体' : '新增遗体' }}</h2>
+              <!-- 第1行：遗照 -->
+              <div class="field">
+                <label class="pixel-label">遗照</label>
+                <div class="portrait-pick-row">
+                  <div class="portrait-pick" @click="openPortraitPicker">
+                    <img v-if="selectedPortraitUrl" :src="selectedPortraitUrl" :alt="'遗照'" />
+                    <span v-else class="pick-plus">＋</span>
+                  </div>
+                  <button class="pixel-btn ghost" @click="form.portrait_id=''">清除</button>
+                </div>
+              </div>
+              <!-- 第2行：姓名 / 性别 / 籍贯 -->
+              <div class="row">
+                <div class="field"><label class="pixel-label">姓名 *</label>
+                  <input class="pixel-input" v-model.trim="form.name" placeholder="必填" /></div>
+                <div class="field"><label class="pixel-label">性别 *</label>
+                  <select class="pixel-select" v-model="form.gender">
+                    <option value="" disabled>请选择</option>
+                    <option value="男">男</option>
+                    <option value="女">女</option>
+                  </select></div>
+                <div class="field"><label class="pixel-label">籍贯</label>
+                  <input class="pixel-input" v-model.trim="form.hometown" placeholder="非必填" /></div>
+              </div>
+              <!-- 第3行：出生日期 / 逝世日期 / 享年(自动) -->
+              <div class="row">
+                <div class="field"><label class="pixel-label">出生日期 *</label>
+                  <input class="pixel-input" type="date" v-model="form.birth_date" /></div>
+                <div class="field"><label class="pixel-label">逝世日期 *</label>
+                  <input class="pixel-input" type="date" v-model="form.death_date" /></div>
+                <div class="field"><label class="pixel-label">享年</label>
+                  <input class="pixel-input" :value="computedAge" readonly placeholder="自动计算" style="background:#f0f0f0" /></div>
+              </div>
+              <!-- 第4行：死因 / 成就 -->
+              <div class="row">
+                <div class="field"><label class="pixel-label">死因</label>
+                  <input class="pixel-input" v-model.trim="form.cause" placeholder="非必填" /></div>
+                <div class="field"><label class="pixel-label">成就</label>
+                  <input class="pixel-input" v-model.trim="form.achievement" placeholder="非必填" /></div>
+              </div>
+              <!-- 第5行：墓志铭 -->
+              <div class="field"><label class="pixel-label">墓志铭</label>
+                <textarea class="pixel-input" v-model.trim="form.epitaph" rows="2" placeholder="非必填"></textarea></div>
+              <!-- 第6行：是否安葬 / 紧急联系人 -->
+              <div class="row">
+                <div class="field"><label class="pixel-label">是否安葬</label>
+                  <select class="pixel-select" v-model="form.buried">
+                    <option :value="0">否</option>
+                    <option :value="1">是</option>
+                  </select></div>
+                <div class="field"><label class="pixel-label">紧急联系人</label>
+                  <input class="pixel-input" v-model.trim="form.emergency_contact" placeholder="非必填" /></div>
+              </div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 遗像选择弹框 -->
+          <div v-if="showPicker" class="modal-mask" @click.self="showPicker=false">
+            <div class="modal">
+              <h2>选择遗照</h2>
+              <div v-if="portraits.length" class="picker-grid">
+                <div class="picker-cell" v-for="p in portraits" :key="p._id" @click="choosePortrait(p)">
+                  <img v-if="p.url" :src="p.url" :alt="'遗像 ' + p._id" />
+                  <span v-else v-html="defaultAvatar"></span>
+                  <div class="picker-id">{{ p._id }}</div>
+                </div>
+              </div>
+              <div v-else class="muted" style="font-size:12px;padding:20px 0;text-align:center">暂无遗像，可先到「遗像管理」上传</div>
+              <div class="modal-btns">
+                <button class="pixel-btn ghost" @click="showPicker=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const rows = ref([]);
+        const portraits = ref([]);
+        const keyword = ref("");
+        const showModal = ref(false);
+        const editing = ref(false);
+        const editId = ref(null);
+        const showPicker = ref(false);
+        const defaultAvatar = DEFAULT_AVATAR_SVG;
+        const form = reactive({
+          name: "", gender: "", age: "", cause: "", hometown: "", achievement: "", epitaph: "",
+          birth_date: "", death_date: "", emergency_contact: "",
+          portrait_id: "", plan_date: "", actual_date: "", buried: 0,
+        });
+
+        const selectedPortraitUrl = computed(() => {
+          if (!form.portrait_id) return "";
+          const p = portraits.value.find((x) => x._id === form.portrait_id);
+          return p ? p.url : "";
+        });
+
+        // 享年自动计算：逝世日期 - 出生日期 得整数年（周岁）
+        const computedAge = computed(() => {
+          if (!form.birth_date || !form.death_date) return "";
+          const b = new Date(form.birth_date);
+          const d = new Date(form.death_date);
+          if (isNaN(b) || isNaN(d) || d < b) return "";
+          let years = d.getFullYear() - b.getFullYear();
+          const m = d.getMonth() - b.getMonth();
+          if (m < 0 || (m === 0 && d.getDate() < b.getDate())) years--;
+          return years >= 0 ? String(years) : "";
+        });
+
+        const load = async () => {
+          const data = { action: "listRemains", token: props.token };
+          if (keyword.value) data.keyword = keyword.value;
+          try { rows.value = await CALL_FN(data); }
+          catch (e) { alert(e.message); }
+        };
+        const loadPortraits = async () => {
+          try { portraits.value = await CALL_FN({ action: "listPortraits", token: props.token }); }
+          catch (e) { /* 选择器加载失败不阻断 */ }
+        };
+
+        const openPortraitPicker = () => { showPicker.value = true; };
+        const choosePortrait = (p) => {
+          form.portrait_id = p._id;
+          showPicker.value = false;
+        };
+
+        const resetForm = () => {
+          form.name = ""; form.gender = ""; form.age = ""; form.cause = ""; form.hometown = "";
+          form.achievement = ""; form.epitaph = ""; form.birth_date = ""; form.death_date = "";
+          form.emergency_contact = ""; form.portrait_id = "";
+          form.plan_date = ""; form.actual_date = ""; form.buried = 0;
+        };
+        const openCreate = () => { editing.value = false; editId.value = null; resetForm(); showModal.value = true; };
+        const openEdit = (r) => {
+          editing.value = true; editId.value = r._id;
+          form.name = r.name; form.gender = r.gender; form.age = r.age; form.cause = r.cause;
+          form.hometown = r.hometown || ""; form.achievement = r.achievement || ""; form.epitaph = r.epitaph || "";
+          form.birth_date = r.birth_date || ""; form.death_date = r.death_date || "";
+          form.emergency_contact = r.emergency_contact || "";
+          form.portrait_id = r.portrait_id || ""; form.plan_date = r.plan_date || ""; form.actual_date = r.actual_date || "";
+          form.buried = r.buried;
+          showModal.value = true;
+        };
+
+        const save = async () => {
+          if (!form.name) { alert("姓名不能为空"); return; }
+          if (form.gender !== "男" && form.gender !== "女") { alert("请选择性别"); return; }
+          if (!form.birth_date) { alert("请选择出生日期"); return; }
+          if (!form.death_date) { alert("请选择逝世日期"); return; }
+          try {
+            const payload = {
+              action: editing.value ? "updateRemain" : "createRemain",
+              token: props.token,
+              data: {
+                name: form.name, gender: form.gender,
+                age: computedAge.value === "" ? 0 : Number(computedAge.value),
+                birth_date: form.birth_date, death_date: form.death_date,
+                cause: form.cause, hometown: form.hometown, achievement: form.achievement, epitaph: form.epitaph,
+                emergency_contact: form.emergency_contact,
+                portrait_id: form.portrait_id || "",
+                plan_date: form.plan_date || "", actual_date: form.actual_date || "",
+                buried: Number(form.buried),
+              },
+            };
+            if (editing.value) payload.id = editId.value;
+            await CALL_FN(payload);
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+
+        const del = async (r) => {
+          if (!confirm(`确定删除遗体「${r.name}」？此操作不可恢复。`)) return;
+          try { await CALL_FN({ action: "deleteRemain", token: props.token, id: r._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+
+        onMounted(() => { load(); loadPortraits(); });
+        return {
+          rows, portraits, keyword, showModal, editing, form, defaultAvatar,
+          showPicker, selectedPortraitUrl, computedAge, openPortraitPicker, choosePortrait,
+          load, openCreate, openEdit, save, del,
+        };
+      },
+    };
+
+    // ===== 首页（灵堂布局）=====
+    const HomePage = {
+      props: ["who"],
+      template: `
+        <div class="shrine">
+          <!-- 两侧白色垂幔 -->
+          <div class="curtain left">
+            <span v-for="n in 10" :key="'l'+n"></span>
+          </div>
+          <div class="curtain right">
+            <span v-for="n in 10" :key="'r'+n"></span>
+          </div>
+          <!-- 顶部白布横幔 -->
+          <div class="top-cloth">
+            <div class="cloth-panel">
+              <div class="line"></div><div class="line dark"></div><div class="line"></div>
+            </div>
+            <div class="cloth-panel">
+              <div class="line"></div><div class="line dark"></div><div class="line"></div>
+            </div>
+            <div class="cloth-panel">
+              <div class="line"></div><div class="line dark"></div><div class="line"></div>
+            </div>
+          </div>
+          <!-- 大奠字 -->
+          <div class="dian">奠</div>
+          <!-- 灵位底座 -->
+          <div class="altar"></div>
+          <div class="altar2"></div>
+          <!-- 底部蜡烛排 -->
+          <div class="candle-row">
+            <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+            <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+            <div class="candle"><div class="flame"></div><div class="wax"></div><div class="base"></div></div>
+          </div>
+        </div>`,
+    };
+
+    // ===== 开发者日志页 =====
+    const DevLogManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <button class="pixel-btn primary" @click="openCreate">＋ 新增日志</button>
+          </div>
+          <div v-if="rows.length" class="table-wrap">
+            <table>
+              <thead><tr><th>开发人员</th><th>发布时间</th><th>更新内容</th></tr></thead>
+              <tbody>
+                <tr v-for="r in rows" :key="r._id">
+                  <td style="font-weight:700">{{ r.developer }}</td>
+                  <td>{{ r.publish_date }}</td>
+                  <td style="white-space:pre-wrap">{{ r.content }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px">暂无日志，点击「新增日志」开始</div>
+
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>新增日志</h2>
+              <div class="field"><label class="pixel-label">开发人员 *</label>
+                <input class="pixel-input" v-model.trim="form.developer" placeholder="必填" /></div>
+              <div class="field"><label class="pixel-label">发布时间 *</label>
+                <input class="pixel-input" type="date" v-model="form.publish_date" /></div>
+              <div class="field"><label class="pixel-label">更新内容 *</label>
+                <textarea class="pixel-input" v-model.trim="form.content" rows="5" placeholder="必填"></textarea></div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const rows = ref([]);
+        const showModal = ref(false);
+        const form = reactive({ developer: "", publish_date: "", content: "" });
+
+        // 默认发布时间 = 今天
+        const todayStr = () => {
+          const d = new Date();
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${y}-${m}-${day}`;
+        };
+
+        const load = async () => {
+          try { rows.value = await CALL_FN({ action: "listDevLogs", token: props.token }); }
+          catch (e) { alert(e.message); }
+        };
+        const openCreate = () => {
+          form.developer = ""; form.content = "";
+          form.publish_date = todayStr();
+          showModal.value = true;
+        };
+        const save = async () => {
+          if (!form.developer) { alert("请填写开发人员"); return; }
+          if (!form.publish_date) { alert("请选择发布时间"); return; }
+          if (!form.content) { alert("请填写更新内容"); return; }
+          try {
+            await CALL_FN({
+              action: "createDevLog", token: props.token,
+              data: { developer: form.developer, publish_date: form.publish_date, content: form.content },
+            });
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+
+        onMounted(load);
+        return { rows, showModal, form, openCreate, save };
+      },
+    };
+
+    // ===== 根组件 =====
+    const Root = {
+      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, DevLogManage },
+      data() {
+        return {
+          token: localStorage.getItem("token") || "",
+          username: localStorage.getItem("username") || "",
+          page: "home",
+        };
+      },
+      computed: {
+        who() { return this.username; },
+        activeComponent() {
+          if (this.page === "portrait") return "portrait-manage";
+          if (this.page === "remain") return "remain-manage";
+          if (this.page === "user") return "user-manage";
+          if (this.page === "devlog") return "dev-log-manage";
+          return "home-page";
+        },
+      },
+      methods: {
+        onLogin(t, name) {
+          this.token = t; this.username = name;
+          localStorage.setItem("token", t); localStorage.setItem("username", name);
+          this.page = "home";
+        },
+        onLogout() {
+          this.token = ""; this.username = "";
+          localStorage.removeItem("token"); localStorage.removeItem("username");
+          this.page = "home";
+        },
+        changePage(p) { this.page = p; },
+      },
+      template: `
+        <login-page v-if="!token" @login="onLogin"></login-page>
+        <app-shell v-else :token="token" :who="who" :page="page" @change-page="changePage" @logout="onLogout">
+          <component :is="activeComponent" :token="token" :who="who"></component>
+        </app-shell>`,
+    };
+
+    createApp(Root).mount("#app");
+  </script>
+</body>
+</html>

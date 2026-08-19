@@ -1,0 +1,10 @@
+{
+  "name": "data-api",
+  "version": "1.0.0",
+  "description": "管理系统后端云函数：登录鉴权 + MySQL 增删改查 + 遗像/遗体管理 + 云存储",
+  "main": "index.js",
+  "dependencies": {
+    "mysql2": "^3.11.0",
+    "@cloudbase/node-sdk": "^2.5.0"
+  }
+}

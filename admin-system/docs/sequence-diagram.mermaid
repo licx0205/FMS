@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant U as 用户(前端)
+    participant C as CALL_FN/HTTP
+    participant F as 云函数 data-api
+    participant S as 云存储
+    participant M as MySQL
+
+    Note over U,M: 上传遗像
+    U->>U: 选图→压缩(≤2048/5MB)→Canvas黑白化→base64
+    U->>C: uploadPortrait {token, data.image}
+    C->>F: HTTP POST
+    F->>F: parseToken→解码Buffer→校验
+    F->>S: uploadFile(cloudPath)
+    S-->>F: fileID
+    F->>S: getTempFileURL
+    S-->>F: tempURL
+    F->>M: INSERT portrait
+    M-->>F: id
+    F-->>U: {id,file_id,url,width,height,size}
+
+    Note over U,M: 新增遗体（选遗照可空）
+    U->>F: createRemain {token, data{name,gender,age,cause,portrait_id?,...}}
+    F->>F: 校验；portrait_id非空则查portrait存在
+    F->>M: INSERT remains
+    M-->>F: id
+    F-->>U: {id}
+
+    Note over U,M: 删除遗像（非级联，引用置NULL）
+    U->>F: deletePortrait {token, id}
+    F->>M: SELECT portrait WHERE id
+    F->>S: deleteFile(fileID)
+    F->>M: DELETE portrait WHERE id
+    F->>M: UPDATE remains SET portrait_id=NULL WHERE portrait_id=id
+    F-->>U: {removed:true}

@@ -1,0 +1,14 @@
+{
+  "envId": "test-d2g8lzeup3f63654a",
+  "version": "2.0",
+  "functionRoot": "./cloudfunctions",
+  "functions": [
+    {
+      "name": "data-api",
+      "timeout": 5,
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "envVariables": {}
+    }
+  ]
+}
