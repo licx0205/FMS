@@ -134,6 +134,25 @@ CREATE TABLE IF NOT EXISTS \`${DEV_LOG_TABLE}\` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
 
+// ===== 灵车表 hearse =====
+const HEARSE_TABLE = "hearse";
+const CREATE_HEARSE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS \`${HEARSE_TABLE}\` (
+  \`id\` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`plate_number\` VARCHAR(32) NOT NULL COMMENT '车牌号，必填唯一',
+  \`vehicle_model\` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '车辆型号',
+  \`seats\` INT NOT NULL DEFAULT 0 COMMENT '座位数',
+  \`use_date\` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '使用时间 YYYY-MM-DD',
+  \`usage_years\` DECIMAL(10,1) NOT NULL DEFAULT 0.0 COMMENT '使用年限(使用时间→当天)，保留1位小数',
+  \`last_maintenance_date\` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '上次保养日期 YYYY-MM-DD',
+  \`status\` VARCHAR(16) NOT NULL DEFAULT '可用' COMMENT '车辆状态: 可用/维修/无效',
+  \`created_at\` BIGINT NOT NULL DEFAULT 0 COMMENT '创建时间戳(ms)',
+  \`updated_at\` BIGINT NOT NULL DEFAULT 0 COMMENT '修改时间戳(ms)',
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uk_plate_number\` (\`plate_number\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
 let pool = null;
 let tableReady = false;
 let cloudApp = null;
@@ -198,6 +217,7 @@ async function ensureTable() {
   await safeQuery(CREATE_PORTRAIT_TABLE_SQL);
   await safeQuery(CREATE_REMAINS_TABLE_SQL);
   await safeQuery(CREATE_DEV_LOG_TABLE_SQL);
+  await safeQuery(CREATE_HEARSE_TABLE_SQL);
   // 老表迁移：若已存在的 users 表缺 is_system 列，则补充
   await migrateIsSystemColumn(p);
   // 老表迁移：remains 表补新增字段（籍贯/成就/墓志铭）
@@ -355,6 +375,51 @@ function remainToDoc(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+// 灵车表行 -> 对外文档
+function hearseToDoc(row) {
+  return {
+    _id: String(row.id),
+    plate_number: row.plate_number,
+    vehicle_model: row.vehicle_model || "",
+    seats: Number(row.seats) || 0,
+    use_date: row.use_date || "",
+    usage_years: Number(row.usage_years) || 0,
+    last_maintenance_date: row.last_maintenance_date || "",
+    status: row.status || "可用",
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// 计算使用年限：从 use_date 到「当天」，保留 1 位小数（未填使用时间返回 0）
+function calcUsageYears(useDate) {
+  const s = String(useDate || "").trim();
+  if (!s || !isValidDateStr(s)) return 0;
+  const [y, m, d] = s.split("-").map(Number);
+  const start = new Date(y, m - 1, d);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (today < start) return 0;
+  const days = Math.floor((today - start) / 86400000);
+  return Math.round((days / 365.25) * 10) / 10;
+}
+
+// 校验灵车输入，返回错误信息或 null
+function validateHearseInput(d, { requirePlate = true } = {}) {
+  const plate = d.plate_number != null ? String(d.plate_number).trim() : "";
+  if (requirePlate && !plate) return "车牌号不能为空";
+  if (!requirePlate && d.plate_number != null && !plate) return "车牌号不能为空";
+  if (d.vehicle_model != null && String(d.vehicle_model).length > 64) return "车辆型号过长";
+  if (d.seats != null) {
+    const s = Number(d.seats);
+    if (!Number.isInteger(s) || s < 0) return "座位数必须为非负整数";
+  }
+  if (d.use_date != null && !isValidDateStr(d.use_date)) return "使用时间格式应为 YYYY-MM-DD";
+  if (d.last_maintenance_date != null && !isValidDateStr(d.last_maintenance_date)) return "上次保养日期格式应为 YYYY-MM-DD";
+  if (d.status != null && !["可用", "维修", "无效"].includes(String(d.status))) return "车辆状态必须为可用/维修/无效";
+  return null;
 }
 
 // 查询某用户是否为系统内置用户
@@ -911,6 +976,120 @@ async function handle(params) {
     case "deleteRemain": {
       if (!id) return fail("缺少遗体 id", 400);
       await safeQuery(`DELETE FROM \`${REMAINS_TABLE}\` WHERE id = ?`, [Number(id)]);
+      return ok({ removed: true });
+    }
+
+    // ===== 灵车管理 =====
+    case "listHearses": {
+      let sql = `SELECT * FROM \`${HEARSE_TABLE}\``;
+      const params = [];
+      if (keyword) {
+        sql += " WHERE plate_number LIKE ? OR vehicle_model LIKE ?";
+        const like = "%" + String(keyword) + "%";
+        params.push(like, like);
+      }
+      sql += " ORDER BY id DESC LIMIT 500";
+      const [rows] = await safeQuery(sql, params);
+      return ok(rows.map(hearseToDoc));
+    }
+
+    case "createHearse": {
+      const d = data || {};
+      const vErr = validateHearseInput(d);
+      if (vErr) return fail(vErr, 400);
+
+      const plate = String(d.plate_number).trim();
+      const [exists] = await safeQuery(
+        `SELECT id FROM \`${HEARSE_TABLE}\` WHERE plate_number = ? LIMIT 1`,
+        [plate]
+      );
+      if (exists.length) return fail("车牌号已存在", 409);
+
+      const model = d.vehicle_model != null ? String(d.vehicle_model).trim() : "";
+      const seats = d.seats != null ? Number(d.seats) : 0;
+      const useDate = d.use_date != null ? String(d.use_date).trim() : "";
+      const usageYears = calcUsageYears(useDate);
+      const lastMaint = d.last_maintenance_date != null ? String(d.last_maintenance_date).trim() : "";
+      const status = d.status != null ? String(d.status) : "可用";
+      const now = Date.now();
+
+      const [res] = await safeQuery(
+        `INSERT INTO \`${HEARSE_TABLE}\` (plate_number, vehicle_model, seats, use_date, usage_years, last_maintenance_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [plate, model, seats, useDate, usageYears, lastMaint, status, now, now]
+      );
+      return ok({ id: String(res.insertId) });
+    }
+
+    case "updateHearse": {
+      const d = data || {};
+      if (!id) return fail("缺少灵车 id", 400);
+
+      const [exists] = await safeQuery(
+        `SELECT id FROM \`${HEARSE_TABLE}\` WHERE id = ? LIMIT 1`,
+        [Number(id)]
+      );
+      if (!exists.length) return fail("灵车记录不存在", 404);
+
+      const vErr = validateHearseInput(d, { requirePlate: false });
+      if (vErr) return fail(vErr, 400);
+
+      const sets = [];
+      const params = [];
+
+      if (d.plate_number != null) {
+        const plate = String(d.plate_number).trim();
+        if (!plate) return fail("车牌号不能为空", 400);
+        const [dup] = await safeQuery(
+          `SELECT id FROM \`${HEARSE_TABLE}\` WHERE plate_number = ? AND id <> ? LIMIT 1`,
+          [plate, Number(id)]
+        );
+        if (dup.length) return fail("车牌号已存在", 409);
+        sets.push("plate_number = ?");
+        params.push(plate);
+      }
+      if (d.vehicle_model != null) {
+        sets.push("vehicle_model = ?");
+        params.push(String(d.vehicle_model).trim());
+      }
+      if (d.seats != null) {
+        const seats = Number(d.seats);
+        if (!Number.isInteger(seats) || seats < 0) return fail("座位数必须为非负整数", 400);
+        sets.push("seats = ?");
+        params.push(seats);
+      }
+      if (d.use_date != null) {
+        const useDate = String(d.use_date).trim();
+        sets.push("use_date = ?");
+        params.push(useDate);
+        // 使用时间变化时同步重算使用年限
+        sets.push("usage_years = ?");
+        params.push(calcUsageYears(useDate));
+      }
+      if (d.last_maintenance_date != null) {
+        sets.push("last_maintenance_date = ?");
+        params.push(String(d.last_maintenance_date).trim());
+      }
+      if (d.status != null) {
+        sets.push("status = ?");
+        params.push(String(d.status));
+      }
+
+      if (!sets.length) return fail("没有需要更新的字段", 400);
+
+      sets.push("updated_at = ?");
+      params.push(Date.now());
+      params.push(Number(id));
+
+      await safeQuery(
+        `UPDATE \`${HEARSE_TABLE}\` SET ${sets.join(", ")} WHERE id = ?`,
+        params
+      );
+      return ok({ updated: true });
+    }
+
+    case "deleteHearse": {
+      if (!id) return fail("缺少灵车 id", 400);
+      await safeQuery(`DELETE FROM \`${HEARSE_TABLE}\` WHERE id = ?`, [Number(id)]);
       return ok({ removed: true });
     }
 

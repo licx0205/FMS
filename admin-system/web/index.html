@@ -66,6 +66,20 @@
     .pixel-btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); box-shadow: 2px 2px 0 0 #b5b5b5; }
     .pixel-btn.ghost:hover { background: #f0f0f0; }
     .pixel-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .pixel-btn.mini { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
+
+    .status-tag {
+      display: inline-block;
+      padding: 2px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }
+    .status-tag.ok { background: #4caf50; color: #fff; border-color: #388e3c; }
+    .status-tag.warn { background: #ff9800; color: #fff; border-color: #f57c00; }
+    .status-tag.off { background: #9e9e9e; color: #fff; border-color: #757575; }
 
     .pixel-input, .pixel-select {
       width: 100%;
@@ -682,6 +696,7 @@
               <div class="nav-item" :class="{active: page==='home'}" @click="$emit('change-page','home')">首页</div>
               <div class="nav-item" :class="{active: page==='portrait'}" @click="$emit('change-page','portrait')">遗像管理</div>
               <div class="nav-item" :class="{active: page==='remain'}" @click="$emit('change-page','remain')">遗体管理</div>
+              <div class="nav-item" :class="{active: page==='hearse'}" @click="$emit('change-page','hearse')">灵车管理</div>
               <div class="nav-item" :class="{active: page==='user'}" @click="$emit('change-page','user')">用户管理</div>
               <div class="nav-item" :class="{active: page==='devlog'}" @click="$emit('change-page','devlog')">开发者日志</div>
             </div>
@@ -699,7 +714,7 @@
         </div>`,
       computed: {
         pageTitle() {
-          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", devlog: "开发者日志" };
+          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", hearse: "灵车管理", devlog: "开发者日志" };
           return map[this.page] || "管理台";
         },
       },
@@ -1256,6 +1271,141 @@
         </div>`,
     };
 
+    // ===== 灵车管理页 =====
+    const HearseManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <input class="pixel-input" v-model.trim="keyword" placeholder="搜索车牌号 / 车辆型号..." @keyup.enter="load" />
+            <button class="pixel-btn" @click="load">搜索</button>
+            <button class="pixel-btn primary" @click="openCreate">＋ 新增灵车</button>
+          </div>
+          <div v-if="rows.length" class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>车牌号</th><th>车辆型号</th><th>座位数</th><th>使用时间</th><th>使用年限(年)</th><th>上次保养日期</th><th>车辆状态</th><th style="width:120px">操作</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="r in rows" :key="r._id">
+                  <td style="font-weight:700">{{ r.plate_number }}</td>
+                  <td>{{ r.vehicle_model || '—' }}</td>
+                  <td>{{ r.seats }}</td>
+                  <td>{{ r.use_date || '—' }}</td>
+                  <td>{{ r.usage_years }}</td>
+                  <td>{{ r.last_maintenance_date || '—' }}</td>
+                  <td><span class="status-tag" :class="statusClass(r.status)">{{ r.status }}</span></td>
+                  <td>
+                    <button class="pixel-btn mini" @click="openEdit(r)">编辑</button>
+                    <button class="pixel-btn mini danger" @click="del(r)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px">暂无灵车，点击「新增灵车」开始</div>
+
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>{{ editing ? '修改灵车' : '新增灵车' }}</h2>
+              <div class="field"><label class="pixel-label">车牌号 *</label>
+                <input class="pixel-input" v-model.trim="form.plate_number" placeholder="必填，唯一" /></div>
+              <div class="field"><label class="pixel-label">车辆型号</label>
+                <input class="pixel-input" v-model.trim="form.vehicle_model" placeholder="选填" /></div>
+              <div class="field"><label class="pixel-label">座位数</label>
+                <input class="pixel-input" type="number" min="0" v-model.number="form.seats" placeholder="选填，非负整数" /></div>
+              <div class="field"><label class="pixel-label">使用时间</label>
+                <input class="pixel-input" type="date" v-model="form.use_date" /></div>
+              <div class="field"><label class="pixel-label">上次保养日期</label>
+                <input class="pixel-input" type="date" v-model="form.last_maintenance_date" /></div>
+              <div class="field"><label class="pixel-label">车辆状态</label>
+                <select class="pixel-input" v-model="form.status">
+                  <option value="可用">可用</option>
+                  <option value="维修">维修</option>
+                  <option value="无效">无效</option>
+                </select></div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const rows = ref([]);
+        const keyword = ref("");
+        const showModal = ref(false);
+        const editing = ref(false);
+        const editId = ref(null);
+        const form = reactive({
+          plate_number: "", vehicle_model: "", seats: "", use_date: "",
+          last_maintenance_date: "", status: "可用",
+        });
+
+        const statusClass = (s) => {
+          if (s === "可用") return "ok";
+          if (s === "维修") return "warn";
+          return "off";
+        };
+
+        const load = async () => {
+          try {
+            rows.value = await CALL_FN({ action: "listHearses", token: props.token, keyword: keyword.value });
+          } catch (e) { alert(e.message); }
+        };
+
+        const resetForm = () => {
+          form.plate_number = ""; form.vehicle_model = ""; form.seats = "";
+          form.use_date = ""; form.last_maintenance_date = ""; form.status = "可用";
+        };
+
+        const openCreate = () => { editing.value = false; editId.value = null; resetForm(); showModal.value = true; };
+        const openEdit = (r) => {
+          editing.value = true; editId.value = r._id;
+          form.plate_number = r.plate_number;
+          form.vehicle_model = r.vehicle_model;
+          form.seats = r.seats;
+          form.use_date = r.use_date;
+          form.last_maintenance_date = r.last_maintenance_date;
+          form.status = r.status;
+          showModal.value = true;
+        };
+
+        const save = async () => {
+          if (!form.plate_number) { alert("车牌号不能为空"); return; }
+          if (form.seats !== "" && form.seats !== null && (!Number.isInteger(form.seats) || form.seats < 0)) {
+            alert("座位数必须为非负整数"); return;
+          }
+          const data = {
+            plate_number: form.plate_number,
+            vehicle_model: form.vehicle_model,
+            seats: form.seats === "" || form.seats === null ? 0 : form.seats,
+            use_date: form.use_date,
+            last_maintenance_date: form.last_maintenance_date,
+            status: form.status,
+          };
+          try {
+            if (editing.value) {
+              await CALL_FN({ action: "updateHearse", token: props.token, id: editId.value, data });
+            } else {
+              await CALL_FN({ action: "createHearse", token: props.token, data });
+            }
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+
+        const del = async (r) => {
+          if (!confirm(`确定删除灵车「${r.plate_number}」？此操作不可恢复。`)) return;
+          try { await CALL_FN({ action: "deleteHearse", token: props.token, id: r._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+
+        onMounted(load);
+        return { rows, keyword, showModal, editing, form, statusClass, load, openCreate, openEdit, save, del };
+      },
+    };
+
     // ===== 开发者日志页 =====
     const DevLogManage = {
       props: ["token"],
@@ -1338,7 +1488,7 @@
 
     // ===== 根组件 =====
     const Root = {
-      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, DevLogManage },
+      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, HearseManage, DevLogManage },
       data() {
         return {
           token: localStorage.getItem("token") || "",
@@ -1351,6 +1501,7 @@
         activeComponent() {
           if (this.page === "portrait") return "portrait-manage";
           if (this.page === "remain") return "remain-manage";
+          if (this.page === "hearse") return "hearse-manage";
           if (this.page === "user") return "user-manage";
           if (this.page === "devlog") return "dev-log-manage";
           return "home-page";
