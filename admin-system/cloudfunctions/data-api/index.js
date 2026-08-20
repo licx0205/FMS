@@ -140,19 +140,64 @@ let cloudApp = null;
 
 async function getPool() {
   if (pool) return pool;
-  pool = mysql.createPool({ ...DB_CONFIG, waitForConnections: true, connectionLimit: 5 });
+  pool = mysql.createPool({
+    ...DB_CONFIG,
+    waitForConnections: true,
+    connectionLimit: 5,
+    // 公网连 CynosDB，NAT 网关会静默断开空闲连接，必须开启保活
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 5000,
+    connectTimeout: 10000,
+    // 空闲连接超过 30 秒未用则主动回收，避免复用已被服务端断开的死连接
+    idleTimeout: 30000,
+  });
   return pool;
+}
+
+// 连接错误判定：这些错误说明连接已失效，重连后可恢复
+function isConnectionError(e) {
+  if (!e) return false;
+  const m = String(e.message || e.code || "");
+  return (
+    m.includes("ECONNRESET") ||
+    m.includes("Malformed communication packet") ||
+    m.includes("PROTOCOL_CONNECTION_LOST") ||
+    m.includes("PROTOCOL_PACKETS_OUT_OF_ORDER") ||
+    m.includes("Connection lost") ||
+    m.includes("Connection is destroyed") ||
+    m.includes("read ETIMEDOUT") ||
+    m.includes("ETIMEDOUT")
+  );
+}
+
+// 查询兜底：遇到连接级错误时，销毁连接池并重连重试一次
+async function safeQuery(sql, params = []) {
+  try {
+    const p = await getPool();
+    return await p.query(sql, params);
+  } catch (e) {
+    if (isConnectionError(e)) {
+      console.warn("连接错误，销毁连接池重连:", e.message);
+      try {
+        if (pool) await pool.end().catch(() => {});
+      } catch (_) {}
+      pool = null;
+      const p = await getPool();
+      return await p.query(sql, params);
+    }
+    throw e;
+  }
 }
 
 // 首次运行：建用户表 + 建旧表 + 建新两表 + 迁移 + 写入种子管理员
 async function ensureTable() {
   if (tableReady) return;
   const p = await getPool();
-  await p.query(CREATE_USERS_TABLE_SQL);
-  await p.query(CREATE_RECORDS_TABLE_SQL);
-  await p.query(CREATE_PORTRAIT_TABLE_SQL);
-  await p.query(CREATE_REMAINS_TABLE_SQL);
-  await p.query(CREATE_DEV_LOG_TABLE_SQL);
+  await safeQuery(CREATE_USERS_TABLE_SQL);
+  await safeQuery(CREATE_RECORDS_TABLE_SQL);
+  await safeQuery(CREATE_PORTRAIT_TABLE_SQL);
+  await safeQuery(CREATE_REMAINS_TABLE_SQL);
+  await safeQuery(CREATE_DEV_LOG_TABLE_SQL);
   // 老表迁移：若已存在的 users 表缺 is_system 列，则补充
   await migrateIsSystemColumn(p);
   // 老表迁移：remains 表补新增字段（籍贯/成就/墓志铭）
@@ -164,13 +209,13 @@ async function ensureTable() {
 // 老表补列：为已存在的 users 表补 is_system 列（先查列是否存在，避免 IF NOT EXISTS 兼容性坑）
 async function migrateIsSystemColumn(p) {
   try {
-    const [cols] = await p.query(
+    const [cols] = await safeQuery(
       `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'is_system'`,
       [USERS_TABLE]
     );
     const hasCol = Number(cols[0].cnt) > 0;
     if (!hasCol) {
-      await p.query(
+      await safeQuery(
         `ALTER TABLE \`${USERS_TABLE}\` ADD COLUMN \`is_system\` TINYINT NOT NULL DEFAULT 0 COMMENT '是否系统内置用户'`
       );
     }
@@ -191,13 +236,13 @@ async function migrateRemainsColumns(p) {
   ];
   for (const [name, def] of cols) {
     try {
-      const [rows] = await p.query(
+      const [rows] = await safeQuery(
         `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
         [REMAINS_TABLE, name]
       );
       const hasCol = Number(rows[0].cnt) > 0;
       if (!hasCol) {
-        await p.query(`ALTER TABLE \`${REMAINS_TABLE}\` ADD COLUMN \`${name}\` ${def}`);
+        await safeQuery(`ALTER TABLE \`${REMAINS_TABLE}\` ADD COLUMN \`${name}\` ${def}`);
       }
     } catch (e) {
       console.error(`migrate ${name} column failed:`, e.message);
@@ -207,18 +252,18 @@ async function migrateRemainsColumns(p) {
 
 // 若 users 表为空，则插入种子管理员 admin/admin123
 async function seedAdmin(p) {
-  const [rows] = await p.query(
+  const [rows] = await safeQuery(
     `SELECT COUNT(*) AS cnt FROM \`${USERS_TABLE}\``
   );
   const cnt = Number(rows[0].cnt);
   if (cnt === 0) {
     const now = Date.now();
-    await p.query(
+    await safeQuery(
       `INSERT INTO \`${USERS_TABLE}\` (account, username, password, status, age, gender, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [SEED_ADMIN_ACCOUNT, "系统管理员", SEED_ADMIN_PASS_HASH, 1, 0, "男", 1, now, now]
     );
   } else {
-    await p.query(
+    await safeQuery(
       `UPDATE \`${USERS_TABLE}\` SET is_system = 1 WHERE account = ?`,
       [SEED_ADMIN_ACCOUNT]
     );
@@ -314,7 +359,7 @@ function remainToDoc(row) {
 
 // 查询某用户是否为系统内置用户
 async function isSystemUser(p, id) {
-  const [rows] = await p.query(
+  const [rows] = await safeQuery(
     `SELECT is_system FROM \`${USERS_TABLE}\` WHERE id = ? LIMIT 1`,
     [id]
   );
@@ -365,7 +410,7 @@ async function checkPortraitExists(p, portraitIdRaw) {
   if (portraitIdRaw == null || portraitIdRaw === "") return { portraitId: null, err: null };
   const pid = Number(portraitIdRaw);
   if (!Number.isInteger(pid) || pid <= 0) return { portraitId: null, err: "遗照 ID 非法" };
-  const [rows] = await p.query(
+  const [rows] = await safeQuery(
     `SELECT id FROM \`${PORTRAIT_TABLE}\` WHERE id = ? LIMIT 1`,
     [pid]
   );
@@ -410,7 +455,7 @@ async function handle(params) {
     if (!acc) return fail("请输入账号", 400);
     if (!passHash) return fail("请输入密码", 400);
 
-    const [rows] = await p.query(
+    const [rows] = await safeQuery(
       `SELECT * FROM \`${USERS_TABLE}\` WHERE account = ? LIMIT 1`,
       [acc]
     );
@@ -439,7 +484,7 @@ async function handle(params) {
         params.push(like, like);
       }
       sql += " ORDER BY id DESC LIMIT 500";
-      const [rows] = await p.query(sql, params);
+      const [rows] = await safeQuery(sql, params);
       return ok(rows.map(userToDoc));
     }
 
@@ -453,7 +498,7 @@ async function handle(params) {
       const passHash = String(d.password || "");
       if (!passHash) return fail("密码不能为空", 400);
 
-      const [exists] = await p.query(
+      const [exists] = await safeQuery(
         `SELECT id FROM \`${USERS_TABLE}\` WHERE account = ? LIMIT 1`,
         [acc]
       );
@@ -467,7 +512,7 @@ async function handle(params) {
 
       const status = d.status === 0 || d.status === "0" || d.status === "注销" ? 0 : 1;
       const now = Date.now();
-      const [res] = await p.query(
+      const [res] = await safeQuery(
         `INSERT INTO \`${USERS_TABLE}\` (account, username, password, status, age, gender, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         [acc, uname, passHash, status, age, gender, now, now]
       );
@@ -518,7 +563,7 @@ async function handle(params) {
       params.push(Date.now());
       params.push(id);
 
-      await p.query(
+      await safeQuery(
         `UPDATE \`${USERS_TABLE}\` SET ${sets.join(", ")} WHERE id = ?`,
         params
       );
@@ -530,7 +575,7 @@ async function handle(params) {
       const isSys = await isSystemUser(p, id);
       if (isSys === null) return fail("用户不存在", 404);
       if (isSys) return fail("系统内置用户不可注销", 403);
-      await p.query(
+      await safeQuery(
         `UPDATE \`${USERS_TABLE}\` SET status = 0, updated_at = ? WHERE id = ?`,
         [Date.now(), id]
       );
@@ -542,13 +587,13 @@ async function handle(params) {
       const isSys = await isSystemUser(p, id);
       if (isSys === null) return fail("用户不存在", 404);
       if (isSys) return fail("系统内置用户不可删除", 403);
-      await p.query(`DELETE FROM \`${USERS_TABLE}\` WHERE id = ?`, [id]);
+      await safeQuery(`DELETE FROM \`${USERS_TABLE}\` WHERE id = ?`, [id]);
       return ok({ removed: true });
     }
 
     // ===== 遗像管理 =====
     case "listPortraits": {
-      const [rows] = await p.query(
+      const [rows] = await safeQuery(
         `SELECT * FROM \`${PORTRAIT_TABLE}\` ORDER BY id DESC LIMIT 500`
       );
       const docs = rows.map(portraitToDoc);
@@ -633,7 +678,7 @@ async function handle(params) {
       }
 
       const now = Date.now();
-      const [res] = await p.query(
+      const [res] = await safeQuery(
         `INSERT INTO \`${PORTRAIT_TABLE}\` (file_id, url, width, height, size, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
         [fileID, tempUrl, width, height, size, now]
       );
@@ -650,7 +695,7 @@ async function handle(params) {
 
     case "deletePortrait": {
       if (!id) return fail("缺少遗像 id", 400);
-      const [rows] = await p.query(
+      const [rows] = await safeQuery(
         `SELECT * FROM \`${PORTRAIT_TABLE}\` WHERE id = ? LIMIT 1`,
         [Number(id)]
       );
@@ -694,7 +739,7 @@ async function handle(params) {
         params.push("%" + String(keyword) + "%");
       }
       sql += " ORDER BY id DESC LIMIT 500";
-      const [rows] = await p.query(sql, params);
+      const [rows] = await safeQuery(sql, params);
       const docs = rows.map(remainToDoc);
 
       // 关联遗照：批量换取临时 URL 附加 portrait_url + portrait_file_id
@@ -703,7 +748,7 @@ async function handle(params) {
         .filter((n) => Number.isInteger(n) && n > 0);
       const portraitMap = {};
       if (portraitIds.length) {
-        const [prows] = await p.query(
+        const [prows] = await safeQuery(
           `SELECT * FROM \`${PORTRAIT_TABLE}\` WHERE id IN (${portraitIds.map(() => "?").join(",")})`,
           portraitIds
         );
@@ -758,7 +803,7 @@ async function handle(params) {
       const buried = d.buried === 1 || d.buried === "1" || d.buried === true ? 1 : 0;
 
       const now = Date.now();
-      const [res] = await p.query(
+      const [res] = await safeQuery(
         `INSERT INTO \`${REMAINS_TABLE}\` (name, gender, age, birth_date, death_date, cause, hometown, achievement, epitaph, portrait_id, emergency_contact, plan_date, actual_date, buried, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [name, d.gender, age, birthDate, deathDate, cause, hometown, achievement, epitaph, pc.portraitId, emergencyContact, planDate, actualDate, buried, now, now]
       );
@@ -769,7 +814,7 @@ async function handle(params) {
       const d = data || {};
       if (!id) return fail("缺少遗体 id", 400);
 
-      const [exists] = await p.query(
+      const [exists] = await safeQuery(
         `SELECT id FROM \`${REMAINS_TABLE}\` WHERE id = ? LIMIT 1`,
         [Number(id)]
       );
@@ -856,7 +901,7 @@ async function handle(params) {
       params.push(Date.now());
       params.push(Number(id));
 
-      await p.query(
+      await safeQuery(
         `UPDATE \`${REMAINS_TABLE}\` SET ${sets.join(", ")} WHERE id = ?`,
         params
       );
@@ -865,13 +910,13 @@ async function handle(params) {
 
     case "deleteRemain": {
       if (!id) return fail("缺少遗体 id", 400);
-      await p.query(`DELETE FROM \`${REMAINS_TABLE}\` WHERE id = ?`, [Number(id)]);
+      await safeQuery(`DELETE FROM \`${REMAINS_TABLE}\` WHERE id = ?`, [Number(id)]);
       return ok({ removed: true });
     }
 
     // ===== 开发者日志 =====
     case "listDevLogs": {
-      const [rows] = await p.query(
+      const [rows] = await safeQuery(
         `SELECT * FROM \`${DEV_LOG_TABLE}\` ORDER BY id DESC LIMIT 500`
       );
       return ok(rows.map((d) => ({
@@ -893,7 +938,7 @@ async function handle(params) {
       if (!isValidDateStr(publishDate)) return fail("发布时间格式错误", 400);
       if (!content) return fail("请填写更新内容", 400);
       const now = Date.now();
-      const [res] = await p.query(
+      const [res] = await safeQuery(
         `INSERT INTO \`${DEV_LOG_TABLE}\` (developer, publish_date, content, created_at) VALUES (?, ?, ?, ?)`,
         [developer, publishDate, content, now]
       );
