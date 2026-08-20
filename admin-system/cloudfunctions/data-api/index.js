@@ -153,6 +153,30 @@ CREATE TABLE IF NOT EXISTS \`${HEARSE_TABLE}\` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
 
+// ===== 司机表 driver =====
+const DRIVER_TABLE = "driver";
+const CREATE_DRIVER_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS \`${DRIVER_TABLE}\` (
+  \`id\` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`name\` VARCHAR(64) NOT NULL COMMENT '姓名，必填',
+  \`employee_no\` VARCHAR(64) NOT NULL COMMENT '员工工号，唯一标识',
+  \`id_card\` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '身份证号',
+  \`gender\` VARCHAR(8) NOT NULL DEFAULT '' COMMENT '性别: 男/女',
+  \`birth_date\` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '出生日期 YYYY-MM-DD',
+  \`age\` INT NOT NULL DEFAULT 0 COMMENT '年龄(周岁)，由出生日期计算',
+  \`phone\` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '联系电话',
+  \`license_no\` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '驾驶证号',
+  \`license_type\` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '准驾车型',
+  \`license_expiry\` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '驾驶证到期日 YYYY-MM-DD',
+  \`status\` VARCHAR(16) NOT NULL DEFAULT '在岗' COMMENT '当前状态: 在岗/休假/停用/离职',
+  \`hire_date\` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '入职日期 YYYY-MM-DD',
+  \`created_at\` BIGINT NOT NULL DEFAULT 0,
+  \`updated_at\` BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uk_employee_no\` (\`employee_no\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
 let pool = null;
 let tableReady = false;
 let cloudApp = null;
@@ -218,6 +242,7 @@ async function ensureTable() {
   await safeQuery(CREATE_REMAINS_TABLE_SQL);
   await safeQuery(CREATE_DEV_LOG_TABLE_SQL);
   await safeQuery(CREATE_HEARSE_TABLE_SQL);
+  await safeQuery(CREATE_DRIVER_TABLE_SQL);
   // 老表迁移：若已存在的 users 表缺 is_system 列，则补充
   await migrateIsSystemColumn(p);
   // 老表迁移：remains 表补新增字段（籍贯/成就/墓志铭）
@@ -419,6 +444,56 @@ function validateHearseInput(d, { requirePlate = true } = {}) {
   if (d.use_date != null && !isValidDateStr(d.use_date)) return "使用时间格式应为 YYYY-MM-DD";
   if (d.last_maintenance_date != null && !isValidDateStr(d.last_maintenance_date)) return "上次保养日期格式应为 YYYY-MM-DD";
   if (d.status != null && !["可用", "维修", "无效"].includes(String(d.status))) return "车辆状态必须为可用/维修/无效";
+  return null;
+}
+
+// 司机表行 -> 对外文档
+function driverToDoc(row) {
+  return {
+    _id: String(row.id),
+    name: row.name,
+    employee_no: row.employee_no,
+    id_card: row.id_card || "",
+    gender: row.gender || "",
+    birth_date: row.birth_date || "",
+    age: Number(row.age) || 0,
+    phone: row.phone || "",
+    license_no: row.license_no || "",
+    license_type: row.license_type || "",
+    license_expiry: row.license_expiry || "",
+    status: row.status || "在岗",
+    hire_date: row.hire_date || "",
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+// 由出生日期计算周岁（未填或非法返回 0）
+function calcAge(birthDate) {
+  const s = String(birthDate || "").trim();
+  if (!s || !isValidDateStr(s)) return 0;
+  const [y, m, d] = s.split("-").map(Number);
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const mDiff = now.getMonth() + 1 - m;
+  if (mDiff < 0 || (mDiff === 0 && now.getDate() < d)) age--;
+  return age < 0 ? 0 : age;
+}
+
+// 校验司机输入，返回错误信息或 null
+function validateDriverInput(d, { requireRequired = true } = {}) {
+  if (requireRequired) {
+    if (d.name == null || !String(d.name).trim()) return "姓名不能为空";
+    if (d.employee_no == null || !String(d.employee_no).trim()) return "员工工号不能为空";
+  } else {
+    if (d.name != null && !String(d.name).trim()) return "姓名不能为空";
+    if (d.employee_no != null && !String(d.employee_no).trim()) return "员工工号不能为空";
+  }
+  if (d.gender != null && d.gender !== "" && d.gender !== "男" && d.gender !== "女") return "性别必须是男或女";
+  if (d.birth_date != null && !isValidDateStr(d.birth_date)) return "出生日期格式应为 YYYY-MM-DD";
+  if (d.license_expiry != null && !isValidDateStr(d.license_expiry)) return "驾驶证到期日格式应为 YYYY-MM-DD";
+  if (d.hire_date != null && !isValidDateStr(d.hire_date)) return "入职日期格式应为 YYYY-MM-DD";
+  if (d.status != null && !["在岗", "休假", "停用", "离职"].includes(String(d.status))) return "当前状态必须为在岗/休假/停用/离职";
   return null;
 }
 
@@ -1090,6 +1165,141 @@ async function handle(params) {
     case "deleteHearse": {
       if (!id) return fail("缺少灵车 id", 400);
       await safeQuery(`DELETE FROM \`${HEARSE_TABLE}\` WHERE id = ?`, [Number(id)]);
+      return ok({ removed: true });
+    }
+
+    // ===== 司机档案 =====
+    case "listDrivers": {
+      let sql = `SELECT * FROM \`${DRIVER_TABLE}\``;
+      const params = [];
+      if (keyword) {
+        sql += " WHERE name LIKE ? OR employee_no LIKE ? OR phone LIKE ?";
+        const like = "%" + String(keyword) + "%";
+        params.push(like, like, like);
+      }
+      sql += " ORDER BY id DESC LIMIT 500";
+      const [rows] = await safeQuery(sql, params);
+      return ok(rows.map(driverToDoc));
+    }
+
+    case "createDriver": {
+      const d = data || {};
+      const vErr = validateDriverInput(d);
+      if (vErr) return fail(vErr, 400);
+
+      const name = String(d.name).trim();
+      const empNo = String(d.employee_no).trim();
+      const [exists] = await safeQuery(
+        `SELECT id FROM \`${DRIVER_TABLE}\` WHERE employee_no = ? LIMIT 1`,
+        [empNo]
+      );
+      if (exists.length) return fail("员工工号已存在", 409);
+
+      const idCard = d.id_card != null ? String(d.id_card).trim() : "";
+      const gender = d.gender != null ? String(d.gender) : "";
+      const birthDate = d.birth_date != null ? String(d.birth_date).trim() : "";
+      const age = calcAge(birthDate);
+      const phone = d.phone != null ? String(d.phone).trim() : "";
+      const licenseNo = d.license_no != null ? String(d.license_no).trim() : "";
+      const licenseType = d.license_type != null ? String(d.license_type).trim() : "";
+      const licenseExpiry = d.license_expiry != null ? String(d.license_expiry).trim() : "";
+      const status = d.status != null ? String(d.status) : "在岗";
+      const hireDate = d.hire_date != null ? String(d.hire_date).trim() : "";
+      const now = Date.now();
+
+      const [res] = await safeQuery(
+        `INSERT INTO \`${DRIVER_TABLE}\` (name, employee_no, id_card, gender, birth_date, age, phone, license_no, license_type, license_expiry, status, hire_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, empNo, idCard, gender, birthDate, age, phone, licenseNo, licenseType, licenseExpiry, status, hireDate, now, now]
+      );
+      return ok({ id: String(res.insertId) });
+    }
+
+    case "updateDriver": {
+      const d = data || {};
+      if (!id) return fail("缺少司机 id", 400);
+
+      const [exists] = await safeQuery(
+        `SELECT id FROM \`${DRIVER_TABLE}\` WHERE id = ? LIMIT 1`,
+        [Number(id)]
+      );
+      if (!exists.length) return fail("司机记录不存在", 404);
+
+      const vErr = validateDriverInput(d, { requireRequired: false });
+      if (vErr) return fail(vErr, 400);
+
+      const sets = [];
+      const params = [];
+
+      if (d.name != null) {
+        sets.push("name = ?");
+        params.push(String(d.name).trim());
+      }
+      if (d.employee_no != null) {
+        const empNo = String(d.employee_no).trim();
+        const [dup] = await safeQuery(
+          `SELECT id FROM \`${DRIVER_TABLE}\` WHERE employee_no = ? AND id <> ? LIMIT 1`,
+          [empNo, Number(id)]
+        );
+        if (dup.length) return fail("员工工号已存在", 409);
+        sets.push("employee_no = ?");
+        params.push(empNo);
+      }
+      if (d.id_card != null) {
+        sets.push("id_card = ?");
+        params.push(String(d.id_card).trim());
+      }
+      if (d.gender != null) {
+        sets.push("gender = ?");
+        params.push(String(d.gender));
+      }
+      if (d.birth_date != null) {
+        const bd = String(d.birth_date).trim();
+        sets.push("birth_date = ?");
+        params.push(bd);
+        sets.push("age = ?");
+        params.push(calcAge(bd));
+      }
+      if (d.phone != null) {
+        sets.push("phone = ?");
+        params.push(String(d.phone).trim());
+      }
+      if (d.license_no != null) {
+        sets.push("license_no = ?");
+        params.push(String(d.license_no).trim());
+      }
+      if (d.license_type != null) {
+        sets.push("license_type = ?");
+        params.push(String(d.license_type).trim());
+      }
+      if (d.license_expiry != null) {
+        sets.push("license_expiry = ?");
+        params.push(String(d.license_expiry).trim());
+      }
+      if (d.status != null) {
+        sets.push("status = ?");
+        params.push(String(d.status));
+      }
+      if (d.hire_date != null) {
+        sets.push("hire_date = ?");
+        params.push(String(d.hire_date).trim());
+      }
+
+      if (!sets.length) return fail("没有需要更新的字段", 400);
+
+      sets.push("updated_at = ?");
+      params.push(Date.now());
+      params.push(Number(id));
+
+      await safeQuery(
+        `UPDATE \`${DRIVER_TABLE}\` SET ${sets.join(", ")} WHERE id = ?`,
+        params
+      );
+      return ok({ updated: true });
+    }
+
+    case "deleteDriver": {
+      if (!id) return fail("缺少司机 id", 400);
+      await safeQuery(`DELETE FROM \`${DRIVER_TABLE}\` WHERE id = ?`, [Number(id)]);
       return ok({ removed: true });
     }
 

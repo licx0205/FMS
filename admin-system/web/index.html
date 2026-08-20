@@ -696,7 +696,8 @@
               <div class="nav-item" :class="{active: page==='home'}" @click="$emit('change-page','home')">首页</div>
               <div class="nav-item" :class="{active: page==='portrait'}" @click="$emit('change-page','portrait')">遗像管理</div>
               <div class="nav-item" :class="{active: page==='remain'}" @click="$emit('change-page','remain')">遗体管理</div>
-              <div class="nav-item" :class="{active: page==='hearse'}" @click="$emit('change-page','hearse')">灵车管理</div>
+              <div class="nav-item" :class="{active: page==='hearse'}" @click="$emit('change-page','hearse')">灵车档案</div>
+              <div class="nav-item" :class="{active: page==='driver'}" @click="$emit('change-page','driver')">司机档案</div>
               <div class="nav-item" :class="{active: page==='user'}" @click="$emit('change-page','user')">用户管理</div>
               <div class="nav-item" :class="{active: page==='devlog'}" @click="$emit('change-page','devlog')">开发者日志</div>
             </div>
@@ -714,7 +715,7 @@
         </div>`,
       computed: {
         pageTitle() {
-          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", hearse: "灵车管理", devlog: "开发者日志" };
+          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", hearse: "灵车档案", driver: "司机档案", devlog: "开发者日志" };
           return map[this.page] || "管理台";
         },
       },
@@ -1271,7 +1272,7 @@
         </div>`,
     };
 
-    // ===== 灵车管理页 =====
+    // ===== 灵车档案页 =====
     const HearseManage = {
       props: ["token"],
       template: `
@@ -1406,6 +1407,182 @@
       },
     };
 
+    // ===== 司机档案页 =====
+    const DriverManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <input class="pixel-input" v-model.trim="keyword" placeholder="搜索姓名 / 工号 / 电话..." @keyup.enter="load" />
+            <button class="pixel-btn" @click="load">搜索</button>
+            <button class="pixel-btn primary" @click="openCreate">＋ 新增司机</button>
+          </div>
+          <div v-if="rows.length" class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>姓名</th><th>工号</th><th>性别</th><th>年龄</th><th>联系电话</th><th>驾驶证号</th><th>准驾车型</th><th>驾驶证到期日</th><th>当前状态</th><th style="width:120px">操作</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="r in rows" :key="r._id">
+                  <td style="font-weight:700">{{ r.name }}</td>
+                  <td>{{ r.employee_no }}</td>
+                  <td>{{ r.gender || '—' }}</td>
+                  <td>{{ r.age }}</td>
+                  <td>{{ r.phone || '—' }}</td>
+                  <td>{{ r.license_no || '—' }}</td>
+                  <td>{{ r.license_type || '—' }}</td>
+                  <td>{{ r.license_expiry || '—' }}</td>
+                  <td><span class="status-tag" :class="statusClass(r.status)">{{ r.status }}</span></td>
+                  <td>
+                    <button class="pixel-btn mini" @click="openEdit(r)">编辑</button>
+                    <button class="pixel-btn mini danger" @click="del(r)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px">暂无司机，点击「新增司机」开始</div>
+
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>{{ editing ? '修改司机' : '新增司机' }}</h2>
+              <div class="field"><label class="pixel-label">姓名 *</label>
+                <input class="pixel-input" v-model.trim="form.name" placeholder="必填" /></div>
+              <div class="field"><label class="pixel-label">员工工号 *</label>
+                <input class="pixel-input" v-model.trim="form.employee_no" placeholder="必填，唯一" /></div>
+              <div class="field"><label class="pixel-label">身份证号</label>
+                <input class="pixel-input" v-model.trim="form.id_card" placeholder="选填" /></div>
+              <div class="field"><label class="pixel-label">性别</label>
+                <select class="pixel-input" v-model="form.gender">
+                  <option value="">— 请选择 —</option>
+                  <option value="男">男</option>
+                  <option value="女">女</option>
+                </select></div>
+              <div class="field"><label class="pixel-label">出生日期</label>
+                <input class="pixel-input" type="date" v-model="form.birth_date" /></div>
+              <div class="field"><label class="pixel-label">年龄</label>
+                <input class="pixel-input" :value="computedAge" disabled placeholder="由出生日期自动计算" /></div>
+              <div class="field"><label class="pixel-label">联系电话</label>
+                <input class="pixel-input" v-model.trim="form.phone" placeholder="选填" /></div>
+              <div class="field"><label class="pixel-label">驾驶证号</label>
+                <input class="pixel-input" v-model.trim="form.license_no" placeholder="选填" /></div>
+              <div class="field"><label class="pixel-label">准驾车型</label>
+                <input class="pixel-input" v-model.trim="form.license_type" placeholder="选填" /></div>
+              <div class="field"><label class="pixel-label">驾驶证到期日</label>
+                <input class="pixel-input" type="date" v-model="form.license_expiry" /></div>
+              <div class="field"><label class="pixel-label">当前状态</label>
+                <select class="pixel-input" v-model="form.status">
+                  <option value="在岗">在岗</option>
+                  <option value="休假">休假</option>
+                  <option value="停用">停用</option>
+                  <option value="离职">离职</option>
+                </select></div>
+              <div class="field"><label class="pixel-label">入职日期</label>
+                <input class="pixel-input" type="date" v-model="form.hire_date" /></div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const rows = ref([]);
+        const keyword = ref("");
+        const showModal = ref(false);
+        const editing = ref(false);
+        const editId = ref(null);
+        const form = reactive({
+          name: "", employee_no: "", id_card: "", gender: "", birth_date: "",
+          phone: "", license_no: "", license_type: "", license_expiry: "", status: "在岗", hire_date: "",
+        });
+
+        const statusClass = (s) => {
+          if (s === "在岗") return "ok";
+          if (s === "休假") return "warn";
+          if (s === "停用") return "off";
+          return "off";
+        };
+
+        // 年龄实时预览（周岁）
+        const computedAge = computed(() => {
+          const bd = form.birth_date;
+          if (!bd) return "";
+          const [y, m, d] = bd.split("-").map(Number);
+          const now = new Date();
+          let age = now.getFullYear() - y;
+          const mDiff = now.getMonth() + 1 - m;
+          if (mDiff < 0 || (mDiff === 0 && now.getDate() < d)) age--;
+          return age < 0 ? 0 : age;
+        });
+
+        const load = async () => {
+          try {
+            rows.value = await CALL_FN({ action: "listDrivers", token: props.token, keyword: keyword.value });
+          } catch (e) { alert(e.message); }
+        };
+
+        const resetForm = () => {
+          form.name = ""; form.employee_no = ""; form.id_card = ""; form.gender = "";
+          form.birth_date = ""; form.phone = ""; form.license_no = ""; form.license_type = "";
+          form.license_expiry = ""; form.status = "在岗"; form.hire_date = "";
+        };
+
+        const openCreate = () => { editing.value = false; editId.value = null; resetForm(); showModal.value = true; };
+        const openEdit = (r) => {
+          editing.value = true; editId.value = r._id;
+          form.name = r.name;
+          form.employee_no = r.employee_no;
+          form.id_card = r.id_card;
+          form.gender = r.gender;
+          form.birth_date = r.birth_date;
+          form.phone = r.phone;
+          form.license_no = r.license_no;
+          form.license_type = r.license_type;
+          form.license_expiry = r.license_expiry;
+          form.status = r.status;
+          form.hire_date = r.hire_date;
+          showModal.value = true;
+        };
+
+        const save = async () => {
+          if (!form.name) { alert("姓名不能为空"); return; }
+          if (!form.employee_no) { alert("员工工号不能为空"); return; }
+          const data = {
+            name: form.name,
+            employee_no: form.employee_no,
+            id_card: form.id_card,
+            gender: form.gender,
+            birth_date: form.birth_date,
+            phone: form.phone,
+            license_no: form.license_no,
+            license_type: form.license_type,
+            license_expiry: form.license_expiry,
+            status: form.status,
+            hire_date: form.hire_date,
+          };
+          try {
+            if (editing.value) {
+              await CALL_FN({ action: "updateDriver", token: props.token, id: editId.value, data });
+            } else {
+              await CALL_FN({ action: "createDriver", token: props.token, data });
+            }
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+
+        const del = async (r) => {
+          if (!confirm(`确定删除司机「${r.name}」？此操作不可恢复。`)) return;
+          try { await CALL_FN({ action: "deleteDriver", token: props.token, id: r._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+
+        onMounted(load);
+        return { rows, keyword, showModal, editing, form, statusClass, computedAge, load, openCreate, openEdit, save, del };
+      },
+    };
+
     // ===== 开发者日志页 =====
     const DevLogManage = {
       props: ["token"],
@@ -1488,7 +1665,7 @@
 
     // ===== 根组件 =====
     const Root = {
-      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, HearseManage, DevLogManage },
+      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, HearseManage, DriverManage, DevLogManage },
       data() {
         return {
           token: localStorage.getItem("token") || "",
@@ -1502,6 +1679,7 @@
           if (this.page === "portrait") return "portrait-manage";
           if (this.page === "remain") return "remain-manage";
           if (this.page === "hearse") return "hearse-manage";
+          if (this.page === "driver") return "driver-manage";
           if (this.page === "user") return "user-manage";
           if (this.page === "devlog") return "dev-log-manage";
           return "home-page";
