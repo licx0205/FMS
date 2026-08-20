@@ -177,6 +177,25 @@ CREATE TABLE IF NOT EXISTS \`${DRIVER_TABLE}\` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `;
 
+// ===== 灵车预约表 reservation =====
+const RESERVATION_TABLE = "reservation";
+const CREATE_RESERVATION_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS \`${RESERVATION_TABLE}\` (
+  \`id\` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  \`hearse_id\` INT UNSIGNED NOT NULL COMMENT '预约车辆 id，关联 hearse',
+  \`driver_id\` INT UNSIGNED NULL DEFAULT NULL COMMENT '关联司机 id，可空',
+  \`start_date\` VARCHAR(16) NOT NULL COMMENT '预约开始日期 YYYY-MM-DD',
+  \`end_date\` VARCHAR(16) NOT NULL COMMENT '预约结束日期 YYYY-MM-DD',
+  \`booker\` VARCHAR(64) NOT NULL COMMENT '预约人，必填',
+  \`phone\` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '联系电话',
+  \`created_at\` BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (\`id\`),
+  KEY \`idx_hearse_id\` (\`hearse_id\`),
+  KEY \`idx_driver_id\` (\`driver_id\`),
+  KEY \`idx_date\` (\`start_date\`, \`end_date\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+
 let pool = null;
 let tableReady = false;
 let cloudApp = null;
@@ -243,6 +262,7 @@ async function ensureTable() {
   await safeQuery(CREATE_DEV_LOG_TABLE_SQL);
   await safeQuery(CREATE_HEARSE_TABLE_SQL);
   await safeQuery(CREATE_DRIVER_TABLE_SQL);
+  await safeQuery(CREATE_RESERVATION_TABLE_SQL);
   // 老表迁移：若已存在的 users 表缺 is_system 列，则补充
   await migrateIsSystemColumn(p);
   // 老表迁移：remains 表补新增字段（籍贯/成就/墓志铭）
@@ -494,6 +514,36 @@ function validateDriverInput(d, { requireRequired = true } = {}) {
   if (d.license_expiry != null && !isValidDateStr(d.license_expiry)) return "驾驶证到期日格式应为 YYYY-MM-DD";
   if (d.hire_date != null && !isValidDateStr(d.hire_date)) return "入职日期格式应为 YYYY-MM-DD";
   if (d.status != null && !["在岗", "休假", "停用", "离职"].includes(String(d.status))) return "当前状态必须为在岗/休假/停用/离职";
+  return null;
+}
+
+// 预约表行 -> 对外文档（附车牌、车型、司机姓名）
+function reservationToDoc(row) {
+  return {
+    _id: String(row.id),
+    hearse_id: String(row.hearse_id),
+    plate_number: row.plate_number || "",
+    vehicle_model: row.vehicle_model || "",
+    driver_id: row.driver_id != null ? String(row.driver_id) : "",
+    driver_name: row.driver_name || "",
+    start_date: row.start_date,
+    end_date: row.end_date,
+    booker: row.booker,
+    phone: row.phone || "",
+    created_at: row.created_at,
+  };
+}
+
+// 校验预约输入，返回错误信息或 null
+function validateReservationInput(d) {
+  if (d.hearse_id == null || !String(d.hearse_id)) return "请选择预约车辆";
+  if (d.start_date == null || !String(d.start_date).trim()) return "请选择预约开始日期";
+  if (d.end_date == null || !String(d.end_date).trim()) return "请选择预约结束日期";
+  if (!isValidDateStr(d.start_date)) return "预约开始日期格式错误";
+  if (!isValidDateStr(d.end_date)) return "预约结束日期格式错误";
+  if (d.start_date > d.end_date) return "预约结束日期不能早于开始日期";
+  const booker = d.booker != null ? String(d.booker).trim() : "";
+  if (!booker) return "预约人不能为空";
   return null;
 }
 
@@ -1301,6 +1351,73 @@ async function handle(params) {
       if (!id) return fail("缺少司机 id", 400);
       await safeQuery(`DELETE FROM \`${DRIVER_TABLE}\` WHERE id = ?`, [Number(id)]);
       return ok({ removed: true });
+    }
+
+    // ===== 灵车预约 =====
+    case "listReservations": {
+      const [rows] = await safeQuery(
+        `SELECT r.*, h.plate_number, h.vehicle_model, d.name AS driver_name
+         FROM \`${RESERVATION_TABLE}\` r
+         LEFT JOIN \`${HEARSE_TABLE}\` h ON h.id = r.hearse_id
+         LEFT JOIN \`${DRIVER_TABLE}\` d ON d.id = r.driver_id
+         ORDER BY r.start_date ASC, r.id DESC LIMIT 1000`
+      );
+      return ok(rows.map(reservationToDoc));
+    }
+
+    case "createReservation": {
+      const d = data || {};
+      const vErr = validateReservationInput(d);
+      if (vErr) return fail(vErr, 400);
+
+      const hearseId = Number(d.hearse_id);
+      // 车辆必须存在且状态为「可用」
+      const [hearseRows] = await safeQuery(
+        `SELECT id, plate_number, status FROM \`${HEARSE_TABLE}\` WHERE id = ? LIMIT 1`,
+        [hearseId]
+      );
+      if (!hearseRows.length) return fail("车辆不存在", 404);
+      if (hearseRows[0].status !== "可用") return fail("该车辆当前不可用（维修/无效）", 400);
+
+      const startDate = String(d.start_date).trim();
+      const endDate = String(d.end_date).trim();
+
+      // 冲突校验：同车，日期区间有任何重叠即拦截
+      const [conflict] = await safeQuery(
+        `SELECT id FROM \`${RESERVATION_TABLE}\`
+         WHERE hearse_id = ? AND start_date <= ? AND end_date >= ?
+         LIMIT 1`,
+        [hearseId, endDate, startDate]
+      );
+      if (conflict.length) return fail("该车辆在该时间段已有预约", 409);
+
+      const driverId = d.driver_id != null && String(d.driver_id) !== "" ? Number(d.driver_id) : null;
+      if (driverId != null) {
+        const [drv] = await safeQuery(
+          `SELECT id FROM \`${DRIVER_TABLE}\` WHERE id = ? LIMIT 1`,
+          [driverId]
+        );
+        if (!drv.length) return fail("司机不存在", 404);
+      }
+
+      const booker = String(d.booker).trim();
+      const phone = d.phone != null ? String(d.phone).trim() : "";
+      const now = Date.now();
+
+      const [res] = await safeQuery(
+        `INSERT INTO \`${RESERVATION_TABLE}\` (hearse_id, driver_id, start_date, end_date, booker, phone, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [hearseId, driverId, startDate, endDate, booker, phone, now]
+      );
+      return ok({ id: String(res.insertId) });
+    }
+
+    case "cancelReservation": {
+      if (!id) return fail("缺少预约 id", 400);
+      const [res] = await safeQuery(
+        `DELETE FROM \`${RESERVATION_TABLE}\` WHERE id = ?`,
+        [Number(id)]
+      );
+      return ok({ removed: true, affected: res.affectedRows });
     }
 
     // ===== 开发者日志 =====

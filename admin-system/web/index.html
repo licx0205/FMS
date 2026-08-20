@@ -81,6 +81,36 @@
     .status-tag.warn { background: #ff9800; color: #fff; border-color: #f57c00; }
     .status-tag.off { background: #9e9e9e; color: #fff; border-color: #757575; }
 
+    /* ===== 灵车预约看板 ===== */
+    .board-title { font-weight: 700; margin: 0 8px; font-size: 15px; }
+    .board-wrap { overflow-x: auto; margin-top: 12px; }
+    .board { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .board th, .board td {
+      border: 1px solid var(--line);
+      padding: 6px;
+      text-align: center;
+      background: #fff;
+      min-width: 72px;
+    }
+    .board th.corner { min-width: 130px; text-align: left; background: #f5f5f5; }
+    .board th.today, .board td.today { background: #fff7e6; }
+    .board .d-week { font-size: 11px; color: #888; }
+    .board .d-day { font-size: 14px; font-weight: 700; }
+    .board .h-name { text-align: left; font-weight: 700; background: #fafafa; }
+    .board .h-plate { font-weight: 700; }
+    .board .h-model { font-size: 11px; color: #999; font-weight: 400; }
+    .cell-empty { height: 34px; border-radius: 6px; }
+    .cell-booked {
+      height: 34px;
+      display: flex; align-items: center; justify-content: center;
+      background: #ffcdd2; color: #b71c1c;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: default;
+    }
+    .res-list-title { font-weight: 700; margin: 20px 0 8px; font-size: 15px; }
+
     .pixel-input, .pixel-select {
       width: 100%;
       font-family: var(--ui-font);
@@ -698,6 +728,7 @@
               <div class="nav-item" :class="{active: page==='remain'}" @click="$emit('change-page','remain')">遗体管理</div>
               <div class="nav-item" :class="{active: page==='hearse'}" @click="$emit('change-page','hearse')">灵车档案</div>
               <div class="nav-item" :class="{active: page==='driver'}" @click="$emit('change-page','driver')">司机档案</div>
+              <div class="nav-item" :class="{active: page==='res'}" @click="$emit('change-page','res')">灵车预约</div>
               <div class="nav-item" :class="{active: page==='user'}" @click="$emit('change-page','user')">用户管理</div>
               <div class="nav-item" :class="{active: page==='devlog'}" @click="$emit('change-page','devlog')">开发者日志</div>
             </div>
@@ -715,7 +746,7 @@
         </div>`,
       computed: {
         pageTitle() {
-          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", hearse: "灵车档案", driver: "司机档案", devlog: "开发者日志" };
+          const map = { home: "首页", user: "用户管理", portrait: "遗像管理", remain: "遗体管理", hearse: "灵车档案", driver: "司机档案", res: "灵车预约", devlog: "开发者日志" };
           return map[this.page] || "管理台";
         },
       },
@@ -1663,9 +1694,232 @@
       },
     };
 
+    // ===== 灵车预约（看板）=====
+    const ResManage = {
+      props: ["token"],
+      template: `
+        <div>
+          <div class="toolbar">
+            <button class="pixel-btn" @click="shiftWeek(-7)">‹ 上一周</button>
+            <span class="board-title">{{ rangeLabel }}</span>
+            <button class="pixel-btn" @click="shiftWeek(7)">下一周 ›</button>
+            <button class="pixel-btn ghost" @click="goToday">回到今天</button>
+            <button class="pixel-btn primary" @click="openCreate">＋ 新增预约</button>
+          </div>
+
+          <!-- 车辆 × 日期矩阵看板 -->
+          <div class="board-wrap">
+            <table class="board">
+              <thead>
+                <tr>
+                  <th class="corner">车辆 \\ 日期</th>
+                  <th v-for="d in days" :key="d.key" :class="{today: d.isToday}">
+                    <div class="d-week">{{ d.week }}</div>
+                    <div class="d-day">{{ d.day }}</div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in hearseRows" :key="h._id">
+                  <td class="h-name">
+                    <div class="h-plate">{{ h.plate_number }}</div>
+                    <div class="h-model">{{ h.vehicle_model }}</div>
+                  </td>
+                  <td v-for="d in days" :key="d.key" :class="{today: d.isToday}">
+                    <div v-if="cellOf(h._id, d.key)" class="cell-booked" :title="cellTip(h._id, d.key)">
+                      {{ cellOf(h._id, d.key).booker }}
+                    </div>
+                    <div v-else class="cell-empty"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="!hearseRows.length" class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px;margin-top:12px">暂无灵车档案，请先添加灵车</div>
+          </div>
+
+          <!-- 预约清单 -->
+          <div class="res-list-title">预约明细</div>
+          <div v-if="resRows.length" class="table-wrap">
+            <table>
+              <thead><tr><th>车牌号</th><th>车辆型号</th><th>司机</th><th>开始日期</th><th>结束日期</th><th>预约人</th><th>电话</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="r in resRows" :key="r._id">
+                  <td style="font-weight:700">{{ r.plate_number }}</td>
+                  <td>{{ r.vehicle_model || '—' }}</td>
+                  <td>{{ r.driver_name || '—' }}</td>
+                  <td>{{ r.start_date }}</td>
+                  <td>{{ r.end_date }}</td>
+                  <td>{{ r.booker }}</td>
+                  <td>{{ r.phone || '—' }}</td>
+                  <td><button class="pixel-btn mini danger" @click="cancel(r)">取消</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty" style="background:#fff;border:1px solid var(--ink);box-shadow:4px 4px 0 0 #000;border-radius:10px;margin-top:12px">暂无预约</div>
+
+          <!-- 新增预约弹窗 -->
+          <div v-if="showModal" class="modal-mask" @click.self="showModal=false">
+            <div class="modal">
+              <h2>新增预约</h2>
+              <div class="field"><label class="pixel-label">预约车辆 *</label>
+                <select class="pixel-input" v-model.number="form.hearse_id">
+                  <option :value="0">— 请选择车辆 —</option>
+                  <option v-for="h in availableHearses" :key="h._id" :value="Number(h._id)">{{ h.plate_number }}（{{ h.vehicle_model }}）</option>
+                </select></div>
+              <div class="field"><label class="pixel-label">关联司机</label>
+                <select class="pixel-input" v-model.number="form.driver_id">
+                  <option :value="0">— 不选司机 —</option>
+                  <option v-for="drv in availableDrivers" :key="drv._id" :value="Number(drv._id)">{{ drv.name }}（{{ drv.employee_no }}）</option>
+                </select></div>
+              <div class="field"><label class="pixel-label">预约开始日期 *</label>
+                <input class="pixel-input" type="date" v-model="form.start_date" /></div>
+              <div class="field"><label class="pixel-label">预约结束日期 *</label>
+                <input class="pixel-input" type="date" v-model="form.end_date" /></div>
+              <div class="field"><label class="pixel-label">预约人 *</label>
+                <input class="pixel-input" v-model.trim="form.booker" placeholder="必填" /></div>
+              <div class="field"><label class="pixel-label">联系电话</label>
+                <input class="pixel-input" v-model.trim="form.phone" placeholder="选填" /></div>
+              <div class="modal-btns">
+                <button class="pixel-btn primary" @click="save">保存</button>
+                <button class="pixel-btn ghost" @click="showModal=false">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      setup(props) {
+        const hearseRows = ref([]);
+        const resRows = ref([]);
+        const showModal = ref(false);
+        const weekOffset = ref(0); // 相对本周的偏移天数
+
+        const form = reactive({
+          hearse_id: 0, driver_id: 0, start_date: "", end_date: "", booker: "", phone: "",
+        });
+
+        // 本周一零点的日期对象
+        const mondayOfWeek = (offsetDays) => {
+          const now = new Date();
+          const day = now.getDay(); // 0=周日
+          const diff = day === 0 ? -6 : 1 - day; // 周一
+          const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff + offsetDays);
+          return monday;
+        };
+
+        const fmt = (d) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${y}-${m}-${day}`;
+        };
+
+        const WEEK_CN = ["日", "一", "二", "三", "四", "五", "六"];
+
+        // 本周 7 天（周一~周日）
+        const days = computed(() => {
+          const monday = mondayOfWeek(weekOffset.value);
+          const arr = [];
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+            const key = fmt(d);
+            arr.push({
+              key,
+              day: d.getDate(),
+              month: d.getMonth() + 1,
+              week: WEEK_CN[d.getDay()],
+              isToday: key === fmt(new Date()),
+            });
+          }
+          return arr;
+        });
+
+        const rangeLabel = computed(() => {
+          const d = days.value;
+          return `${d[0].month}/${d[0].day} ~ ${d[6].month}/${d[6].day}`;
+        });
+
+        // 只展示「可用」的车辆作为看板行
+        const availableHearses = computed(() =>
+          hearseRows.value.filter((h) => h.status === "可用")
+        );
+        const availableDrivers = ref([]);
+
+        // 某车某天是否被预约（返回预约对象或 null）
+        const cellOf = (hearseId, dayKey) => {
+          // 处理 NUMERIC：dayKey 已是 "YYYY-MM-DD"
+          const found = resRows.value.find((r) =>
+            String(r.hearse_id) === String(hearseId) &&
+            r.start_date <= dayKey && r.end_date >= dayKey
+          );
+          return found || null;
+        };
+        const cellTip = (hearseId, dayKey) => {
+          const r = cellOf(hearseId, dayKey);
+          if (!r) return "";
+          return `${r.booker}（${r.driver_name || "无司机"}）${r.start_date}~${r.end_date}`;
+        };
+
+        const load = async () => {
+          try {
+            hearseRows.value = await CALL_FN({ action: "listHearses", token: props.token });
+            resRows.value = await CALL_FN({ action: "listReservations", token: props.token });
+            availableDrivers.value = await CALL_FN({ action: "listDrivers", token: props.token });
+            // 司机只显示「在岗」
+            availableDrivers.value = availableDrivers.value.filter((d) => d.status === "在岗");
+          } catch (e) { alert(e.message); }
+        };
+
+        const shiftWeek = (n) => { weekOffset.value += n; };
+        const goToday = () => { weekOffset.value = 0; };
+
+        const openCreate = () => {
+          form.hearse_id = 0; form.driver_id = 0; form.booker = ""; form.phone = "";
+          // 默认预约日期 = 今天
+          form.start_date = fmt(new Date());
+          form.end_date = fmt(new Date());
+          showModal.value = true;
+        };
+
+        const save = async () => {
+          if (!form.hearse_id) { alert("请选择预约车辆"); return; }
+          if (!form.start_date) { alert("请选择预约开始日期"); return; }
+          if (!form.end_date) { alert("请选择预约结束日期"); return; }
+          if (form.start_date > form.end_date) { alert("结束日期不能早于开始日期"); return; }
+          if (!form.booker) { alert("请填写预约人"); return; }
+          try {
+            await CALL_FN({
+              action: "createReservation", token: props.token,
+              data: {
+                hearse_id: form.hearse_id,
+                driver_id: form.driver_id || null,
+                start_date: form.start_date,
+                end_date: form.end_date,
+                booker: form.booker,
+                phone: form.phone,
+              },
+            });
+            showModal.value = false;
+            load();
+          } catch (e) { alert(e.message); }
+        };
+
+        const cancel = async (r) => {
+          if (!confirm(`确定取消预约「${r.plate_number} ${r.start_date}~${r.end_date} 预约人：${r.booker}」？`)) return;
+          try { await CALL_FN({ action: "cancelReservation", token: props.token, id: r._id }); load(); }
+          catch (e) { alert(e.message); }
+        };
+
+        onMounted(load);
+        return {
+          hearseRows, availableHearses, resRows, days, rangeLabel, cellOf, cellTip,
+          showModal, form, availableDrivers, load, shiftWeek, goToday, openCreate, save, cancel,
+        };
+      },
+    };
+
     // ===== 根组件 =====
     const Root = {
-      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, HearseManage, DriverManage, DevLogManage },
+      components: { LoginPage, AppShell, HomePage, UserManage, PortraitManage, RemainManage, HearseManage, DriverManage, ResManage, DevLogManage },
       data() {
         return {
           token: localStorage.getItem("token") || "",
@@ -1680,6 +1934,7 @@
           if (this.page === "remain") return "remain-manage";
           if (this.page === "hearse") return "hearse-manage";
           if (this.page === "driver") return "driver-manage";
+          if (this.page === "res") return "res-manage";
           if (this.page === "user") return "user-manage";
           if (this.page === "devlog") return "dev-log-manage";
           return "home-page";
